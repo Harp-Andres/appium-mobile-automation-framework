@@ -5,7 +5,7 @@ on:
     branches: [ main, develop, 'release/**' ]
   pull_request:
     branches: [ main, develop ]
-  #schedule:
+  #schedule: Temporalmente deshabilitado para enfocarnos en ejecución manual
     # Smoke tests diarios: 6:00 AM UTC
     # - cron: '0 6 * * *' Temporalmente deshabilitado para enfocarnos en ejecución manual
     # Full tests (incluye mobile): Viernes 10:00 AM UTC
