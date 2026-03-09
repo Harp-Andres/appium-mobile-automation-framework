@@ -187,7 +187,34 @@ jobs:
         shell: cmd
         run: |
           echo Checking ADB for runner user...
-          adb devices || (echo ERROR: ADB not available for this runner user && exit /b 1)
+          set "ADB_BIN="
+
+          where adb >nul 2>&1 && set "ADB_BIN=adb"
+          if not defined ADB_BIN if exist "%ANDROID_HOME%\platform-tools\adb.exe" set "ADB_BIN=%ANDROID_HOME%\platform-tools\adb.exe"
+          if not defined ADB_BIN if exist "%ANDROID_SDK_ROOT%\platform-tools\adb.exe" set "ADB_BIN=%ANDROID_SDK_ROOT%\platform-tools\adb.exe"
+          if not defined ADB_BIN if exist "C:\Users\%USERNAME%\AppData\Local\Android\Sdk\platform-tools\adb.exe" set "ADB_BIN=C:\Users\%USERNAME%\AppData\Local\Android\Sdk\platform-tools\adb.exe"
+          if not defined ADB_BIN if exist "C:\Android\Sdk\platform-tools\adb.exe" set "ADB_BIN=C:\Android\Sdk\platform-tools\adb.exe"
+
+          if not defined ADB_BIN (
+            for /f "delims=" %%i in ('where /R "C:\Users" adb.exe 2^>nul') do (
+              set "ADB_BIN=%%i"
+              goto :adb_found
+            )
+          )
+
+          :adb_found
+          if not defined ADB_BIN (
+            echo ERROR: ADB not found. Configure ANDROID_HOME/ANDROID_SDK_ROOT for the runner service user.
+            exit /b 1
+          )
+
+          if /I not "%ADB_BIN%"=="adb" (
+            for %%D in ("%ADB_BIN%") do echo %%~dpD>>"%GITHUB_PATH%"
+          )
+
+          "%ADB_BIN%" start-server || (echo ERROR: Could not start ADB server && exit /b 1)
+          "%ADB_BIN%" devices || (echo ERROR: ADB not available for this runner user && exit /b 1)
+
           echo Checking Appium server at %APPIUM_SERVER_URL%...
           curl.exe -s %APPIUM_SERVER_URL%/status >nul 2>&1 || (echo ERROR: Appium server not reachable at %APPIUM_SERVER_URL% && exit /b 1)
 
