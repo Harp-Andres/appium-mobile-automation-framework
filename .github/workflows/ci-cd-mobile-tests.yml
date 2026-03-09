@@ -207,12 +207,12 @@ jobs:
         run: |
           echo Checking ADB and Appium Server...
           
-          REM Direct path to ADB (for Windows self-hosted runner)
-          set "ADB_BIN=C:\Users\ANDRE\AppData\Local\Android\Sdk\platform-tools\adb.exe"
+          REM Path to ADB (using actual Android SDK location)
+          set "ADB_BIN=C:\Users\ANDRE\AppData\Local\Android\platform-tools\adb.exe"
           
           if not exist "%ADB_BIN%" (
             echo ERROR: ADB not found at %ADB_BIN%
-            echo Please verify Android SDK is installed at: C:\Users\ANDRE\AppData\Local\Android\Sdk
+            echo Android SDK location: C:\Users\ANDRE\AppData\Local\Android
             exit /b 1
           )
           
