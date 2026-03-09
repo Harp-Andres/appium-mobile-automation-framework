@@ -191,16 +191,31 @@ jobs:
         if: matrix.test-env == 'local'
         run: |
           echo Checking ADB...
-          where adb || (echo ADB not found in PATH && exit /b 1)
           adb devices
-          echo Checking Appium server at %APPIUM_SERVER_URL% ...
-          curl.exe -s %APPIUM_SERVER_URL%/status >nul 2>&1 || (echo Appium server not reachable at %APPIUM_SERVER_URL%/status && exit /b 1)
+          echo.
+          echo Checking Appium server at %APPIUM_SERVER_URL%...
+          curl.exe -s %APPIUM_SERVER_URL%/status
+          if errorlevel 1 (
+            echo ERROR: Appium server not reachable at %APPIUM_SERVER_URL%
+            exit /b 1
+          )
+          echo Appium server is running
+        shell: cmd
 
       # ====== BROWSERSTACK (Cloud) ======
       - name: 🌐 [BROWSERSTACK] Configure Credentials
         if: matrix.test-env == 'browserstack'
         run: |
-          echo "ℹ️  Using BrowserStack credentials from GitHub Secrets"
+          echo "ℹ️  Validating BrowserStack credentials..."
+          if [ -z "$BROWSERSTACK_USERNAME" ] || [ -z "$BROWSERSTACK_ACCESS_KEY" ]; then
+            echo "❌ ERROR: BrowserStack credentials not found in secrets"
+            exit 1
+          fi
+          echo "✅ BrowserStack credentials validated"
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+        shell: bash
 
       # ====== AWS DEVICE FARM (Cloud) ======
       - name: ☁️ [AWS] Configure AWS Credentials
@@ -215,7 +230,12 @@ jobs:
       - name: 📱 [LOCAL] Run Mobile Tests - ${{ matrix.environment }}
         if: matrix.test-env == 'local'
         run: |
-          echo Running tests on LOCAL self-hosted runner (Windows)
+          echo ========================================
+          echo Running Mobile Tests on LOCAL Windows Runner
+          echo ========================================
+          echo Environment: local
+          echo Platform: Android
+          echo ========================================
           mvn test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
         shell: cmd
 
