@@ -126,13 +126,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs: build-and-analyze
     timeout-minutes: 120
-    # Ejecutar solo si el entorno de la matriz coincide con la selección del usuario
-    if: |
-      always() && (
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == matrix.test-env) ||
-        (github.event_name == 'schedule' && matrix.test-env == 'local') ||
-        (contains(github.event.head_commit.message, '[mobile-tests]') && matrix.test-env == 'local')
-      )
 
     strategy:
       fail-fast: false
@@ -176,10 +169,43 @@ jobs:
         shell: ${{ matrix.shell }}
 
     steps:
+      # ====== VALIDACIÓN INICIAL: Determinar si este entorno debe ejecutarse ======
+      - name: 🔍 Validate Environment Selection
+        id: validate-env
+        run: |
+          echo "=== Environment Validation ==="
+          echo "Event: ${{ github.event_name }}"
+          echo "Selected Environment: ${{ github.event.inputs.test-environment }}"
+          echo "Matrix Environment: ${{ matrix.test-env }}"
+          
+          SHOULD_RUN="false"
+          
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.test-environment }}" = "${{ matrix.test-env }}" ]; then
+              SHOULD_RUN="true"
+              echo "✅ Environment matches user selection"
+            else
+              echo "⏭️  Skipping - Environment does not match"
+            fi
+          elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ contains(github.event.head_commit.message, '[mobile-tests]') }}" = "true" ]; then
+            if [ "${{ matrix.test-env }}" = "local" ]; then
+              SHOULD_RUN="true"
+              echo "✅ Running scheduled/commit local tests"
+            else
+              echo "⏭️  Skipping - Only local runs on schedule"
+            fi
+          fi
+          
+          echo "should-run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+          echo "=== Result: should-run=$SHOULD_RUN ==="
+        shell: bash
+
       - name: 📥 Checkout code
+        if: steps.validate-env.outputs.should-run == 'true'
         uses: actions/checkout@v4
 
       - name: ☕ Set up Java ${{ env.JAVA_VERSION }}
+        if: steps.validate-env.outputs.should-run == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
@@ -188,7 +214,7 @@ jobs:
 
       # ====== LOCAL (Windows) ======
       - name: ✅ [LOCAL] Verify ADB and Appium Server
-        if: matrix.test-env == 'local'
+        if: steps.validate-env.outputs.should-run == 'true' && matrix.test-env == 'local'
         run: |
           echo Checking ADB...
           adb devices
@@ -204,7 +230,7 @@ jobs:
 
       # ====== BROWSERSTACK (Cloud) ======
       - name: 🌐 [BROWSERSTACK] Configure Credentials
-        if: matrix.test-env == 'browserstack'
+        if: steps.validate-env.outputs.should-run == 'true' && matrix.test-env == 'browserstack'
         run: |
           echo "ℹ️  Validating BrowserStack credentials..."
           if [ -z "$BROWSERSTACK_USERNAME" ] || [ -z "$BROWSERSTACK_ACCESS_KEY" ]; then
@@ -219,7 +245,7 @@ jobs:
 
       # ====== AWS DEVICE FARM (Cloud) ======
       - name: ☁️ [AWS] Configure AWS Credentials
-        if: matrix.test-env == 'aws-device-farm'
+        if: steps.validate-env.outputs.should-run == 'true' && matrix.test-env == 'aws-device-farm'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -228,7 +254,7 @@ jobs:
 
       # ====== RUN TESTS (Multi-Environment) ======
       - name: 📱 [LOCAL] Run Mobile Tests - ${{ matrix.environment }}
-        if: matrix.test-env == 'local'
+        if: steps.validate-env.outputs.should-run == 'true' && matrix.test-env == 'local'
         run: |
           echo ========================================
           echo Running Mobile Tests on LOCAL Windows Runner
@@ -240,7 +266,7 @@ jobs:
         shell: cmd
 
       - name: 📱 [BROWSERSTACK] Run Mobile Tests - ${{ matrix.environment }}
-        if: matrix.test-env == 'browserstack'
+        if: steps.validate-env.outputs.should-run == 'true' && matrix.test-env == 'browserstack'
         env:
           TEST_PLATFORM: ${{ matrix.platform }}
           BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
@@ -251,7 +277,7 @@ jobs:
         shell: bash
 
       - name: 📱 [AWS] Run Mobile Tests - ${{ matrix.environment }}
-        if: matrix.test-env == 'aws-device-farm'
+        if: steps.validate-env.outputs.should-run == 'true' && matrix.test-env == 'aws-device-farm'
         env:
           TEST_PLATFORM: ${{ matrix.platform }}
         run: |
