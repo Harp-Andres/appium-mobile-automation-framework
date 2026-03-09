@@ -174,35 +174,18 @@ jobs:
         shell: ${{ matrix.shell }}
 
     steps:
-      # ====== FILTRO CRÍTICO: Skip job si no coincide con el entorno seleccionado ======
-      - name: 🔍 Check if this environment should run
-        id: should-run
-        run: |
-          $shouldRun = "false"
-          
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $selectedEnv = "${{ github.event.inputs.test-environment }}"
-            $matrixEnv = "${{ matrix.test-env }}"
-            
-            if ($selectedEnv -eq $matrixEnv) {
-              $shouldRun = "true"
-            }
-          } elseif ("${{ github.event_name }}" -eq "schedule" -or "${{ contains(github.event.head_commit.message, '[mobile-tests]') }}" -eq "true") {
-            if ("${{ matrix.test-env }}" -eq "local") {
-              $shouldRun = "true"
-            }
-          }
-          
-          echo "should-run=$shouldRun" >> $env:GITHUB_OUTPUT
-          echo "🔍 Environment: ${{ matrix.environment }} | Should Run: $shouldRun"
-        shell: pwsh
-
       - name: 📥 Checkout code
-        if: steps.should-run.outputs.should-run == 'true'
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == matrix.test-env) ||
+          (github.event_name == 'schedule' && matrix.test-env == 'local') ||
+          (contains(github.event.head_commit.message, '[mobile-tests]') && matrix.test-env == 'local')
         uses: actions/checkout@v4
 
       - name: ☕ Set up Java ${{ env.JAVA_VERSION }}
-        if: steps.should-run.outputs.should-run == 'true'
+        if: |
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == matrix.test-env) ||
+          (github.event_name == 'schedule' && matrix.test-env == 'local') ||
+          (contains(github.event.head_commit.message, '[mobile-tests]') && matrix.test-env == 'local')
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
@@ -211,7 +194,12 @@ jobs:
 
       # ====== LOCAL (Windows) ======
       - name: ✅ [LOCAL] Verify ADB and Appium Server
-        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'local'
+        if: |
+          matrix.test-env == 'local' && (
+            (github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == 'local') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.head_commit.message, '[mobile-tests]'))
+          )
         run: |
           echo Checking ADB...
           where adb || (echo ADB not found in PATH && exit /b 1)
@@ -221,13 +209,19 @@ jobs:
 
       # ====== BROWSERSTACK (Cloud) ======
       - name: 🌐 [BROWSERSTACK] Configure Credentials
-        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'browserstack'
+        if: |
+          matrix.test-env == 'browserstack' && (
+            github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == 'browserstack'
+          )
         run: |
           echo "ℹ️  Using BrowserStack credentials from GitHub Secrets"
 
       # ====== AWS DEVICE FARM (Cloud) ======
       - name: ☁️ [AWS] Configure AWS Credentials
-        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'aws-device-farm'
+        if: |
+          matrix.test-env == 'aws-device-farm' && (
+            github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == 'aws-device-farm'
+          )
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -236,14 +230,22 @@ jobs:
 
       # ====== RUN TESTS (Multi-Environment) ======
       - name: 📱 [LOCAL] Run Mobile Tests - ${{ matrix.environment }}
-        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'local'
+        if: |
+          matrix.test-env == 'local' && (
+            (github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == 'local') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.head_commit.message, '[mobile-tests]'))
+          )
         run: |
           echo Running tests on LOCAL self-hosted runner (Windows)
           mvn test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
         shell: cmd
 
       - name: 📱 [BROWSERSTACK] Run Mobile Tests - ${{ matrix.environment }}
-        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'browserstack'
+        if: |
+          matrix.test-env == 'browserstack' && (
+            github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == 'browserstack'
+          )
         env:
           TEST_PLATFORM: ${{ matrix.platform }}
           BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
@@ -254,7 +256,10 @@ jobs:
         shell: bash
 
       - name: 📱 [AWS] Run Mobile Tests - ${{ matrix.environment }}
-        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'aws-device-farm'
+        if: |
+          matrix.test-env == 'aws-device-farm' && (
+            github.event_name == 'workflow_dispatch' && github.event.inputs.test-environment == 'aws-device-farm'
+          )
         env:
           TEST_PLATFORM: ${{ matrix.platform }}
         run: |
