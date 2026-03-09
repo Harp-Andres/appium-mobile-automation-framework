@@ -137,23 +137,42 @@ jobs:
           RUN_MOBILE="false"
           MATRIX='{"include":[]}'
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.include-mobile-tests }}" = "true" ]; then
-            case "${{ github.event.inputs.test-environment }}" in
-              local)
-                RUN_MOBILE="true"
-                MATRIX='{"include":[{"environment":"local-android","os":["self-hosted","android","appium","windows"],"test-env":"local","platform":"android"}]}'
-                ;;
-              browserstack)
-                RUN_MOBILE="true"
-                MATRIX='{"include":[{"environment":"browserstack-android","os":"ubuntu-latest","test-env":"browserstack","platform":"android"},{"environment":"browserstack-ios","os":"ubuntu-latest","test-env":"browserstack","platform":"ios"}]}'
-                ;;
-              aws-device-farm)
-                RUN_MOBILE="true"
-                MATRIX='{"include":[{"environment":"aws-device-farm","os":"ubuntu-latest","test-env":"aws-device-farm","platform":"android"}]}'
-                ;;
-            esac
+          echo "=== DEBUG ==="
+          echo "Event: ${{ github.event_name }}"
+          echo "Include Mobile Tests: ${{ github.event.inputs.include-mobile-tests }}"
+          echo "Test Environment: ${{ github.event.inputs.test-environment }}"
+
+          # Check if workflow_dispatch AND include-mobile-tests is true
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.include-mobile-tests }}" == "true" ]; then
+              case "${{ github.event.inputs.test-environment }}" in
+                local)
+                  RUN_MOBILE="true"
+                  MATRIX='{"include":[{"environment":"local-android","os":["self-hosted","android","appium","windows"],"test-env":"local","platform":"android"}]}'
+                  echo "✅ Selected: LOCAL environment"
+                  ;;
+                browserstack)
+                  RUN_MOBILE="true"
+                  MATRIX='{"include":[{"environment":"browserstack-android","os":"ubuntu-latest","test-env":"browserstack","platform":"android"},{"environment":"browserstack-ios","os":"ubuntu-latest","test-env":"browserstack","platform":"ios"}]}'
+                  echo "✅ Selected: BROWSERSTACK environment"
+                  ;;
+                aws-device-farm)
+                  RUN_MOBILE="true"
+                  MATRIX='{"include":[{"environment":"aws-device-farm","os":"ubuntu-latest","test-env":"aws-device-farm","platform":"android"}]}'
+                  echo "✅ Selected: AWS-DEVICE-FARM environment"
+                  ;;
+              esac
+            else
+              echo "⏭️  Skipping: include-mobile-tests is false"
+            fi
+          else
+            echo "⏭️  Skipping: Not a workflow_dispatch event (event=${{ github.event_name }})"
           fi
 
+          echo "=== OUTPUT ==="
+          echo "run_mobile=$RUN_MOBILE"
+          echo "mobile_matrix=$MATRIX"
+          
           echo "run_mobile=$RUN_MOBILE" >> "$GITHUB_OUTPUT"
           echo "mobile_matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
