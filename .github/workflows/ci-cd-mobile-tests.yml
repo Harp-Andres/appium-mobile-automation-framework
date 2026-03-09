@@ -126,6 +126,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs: build-and-analyze
     timeout-minutes: 120
+    # Solo ejecutar tests móviles en workflow_dispatch (manual)
+    if: github.event_name == 'workflow_dispatch'
 
     strategy:
       fail-fast: false
@@ -169,36 +171,27 @@ jobs:
         shell: ${{ matrix.shell }}
 
     steps:
-      # ====== VALIDACIÓN INICIAL: Determinar si este entorno debe ejecutarse ======
+      # ====== VALIDACIÓN: Solo ejecutar el entorno seleccionado manualmente ======
       - name: 🔍 Validate Environment Selection
         id: validate-env
         run: |
           echo "=== Environment Validation ==="
-          echo "Event: ${{ github.event_name }}"
+          echo "Event: workflow_dispatch"
           echo "Selected Environment: ${{ github.event.inputs.test-environment }}"
           echo "Matrix Environment: ${{ matrix.test-env }}"
           
-          SHOULD_RUN="false"
+          $shouldRun = "false"
           
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.test-environment }}" = "${{ matrix.test-env }}" ]; then
-              SHOULD_RUN="true"
-              echo "✅ Environment matches user selection"
-            else
-              echo "⏭️  Skipping - Environment does not match"
-            fi
-          elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ contains(github.event.head_commit.message, '[mobile-tests]') }}" = "true" ]; then
-            if [ "${{ matrix.test-env }}" = "local" ]; then
-              SHOULD_RUN="true"
-              echo "✅ Running scheduled/commit local tests"
-            else
-              echo "⏭️  Skipping - Only local runs on schedule"
-            fi
-          fi
+          if ("${{ github.event.inputs.test-environment }}" -eq "${{ matrix.test-env }}") {
+            $shouldRun = "true"
+            Write-Host "✅ Environment matches user selection - WILL RUN" -ForegroundColor Green
+          } else {
+            Write-Host "⏭️  Skipping - Environment does not match selection" -ForegroundColor Yellow
+          }
           
-          echo "should-run=$SHOULD_RUN" >> $GITHUB_OUTPUT
-          echo "=== Result: should-run=$SHOULD_RUN ==="
-        shell: bash
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "should-run=$shouldRun"
+          echo "=== Result: should-run=$shouldRun ==="
+        shell: pwsh
 
       - name: 📥 Checkout code
         if: steps.validate-env.outputs.should-run == 'true'
