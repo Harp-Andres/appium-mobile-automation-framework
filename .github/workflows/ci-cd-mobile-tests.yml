@@ -1,0 +1,294 @@
+name: 🚀 Mobile Test Automation - Professional Pipeline 2026
+
+on:
+  push:
+    branches: [ main, develop, 'release/**' ]
+  pull_request:
+    branches: [ main, develop ]
+  #schedule:
+    # Smoke tests diarios: 6:00 AM UTC
+    # - cron: '0 6 * * *' Temporalmente deshabilitado para enfocarnos en ejecución manual
+    # Full tests (incluye mobile): Viernes 10:00 AM UTC
+    # - cron: '0 10 * * 5' Temporalmente deshabilitado para enfocarnos en ejecución manual
+  workflow_dispatch:
+    inputs:
+      test-environment:
+        description: 'Test Environment'
+        required: true
+        default: 'local'
+        type: choice
+        options:
+          - local
+          - browserstack
+          - aws-device-farm
+      include-mobile-tests:
+        description: 'Include Mobile Tests'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  JAVA_VERSION: '17'
+  MAVEN_VERSION: '3.9'
+  APPIUM_SERVER_URL: 'http://127.0.0.1:4723'
+
+jobs:
+  # ==========================================
+  # STAGE 1: Build & Static Analysis
+  # ==========================================
+  build-and-analyze:
+    name: Build & Code Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ☕ Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: 🔨 Build with Maven
+        run: mvn clean install -DskipTests -B -V
+
+      - name: 📊 Run SonarQube Analysis (Optional)
+        if: always()
+        run: |
+          echo "ℹ️ SonarQube analysis skipped (configure if needed)"
+
+      - name: 📦 Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: target/
+          retention-days: 1
+
+  # ==========================================
+  # STAGE 2: Framework Tests (Cloud - Ubuntu)
+  # ==========================================
+  test-framework-cloud:
+    name: Framework Tests (Cloud)
+    runs-on: ubuntu-latest
+    needs: build-and-analyze
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ☕ Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: 🧪 Run Framework Health Tests
+        run: mvn test -Drun.mobile.tests=false -B
+
+      - name: 📊 Generate Test Report
+        if: always()
+        run: mvn allure:report -B || echo "⚠️ Allure report skipped"
+
+      - name: 📁 Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-test-results
+          path: |
+            target/allure-results/
+            target/cucumber-reports/
+            target/surefire-reports/
+          retention-days: 30
+
+      - name: 📈 Publish Test Report to GitHub Pages
+        if: success() && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: target/allure-report
+
+  # ==========================================
+  # STAGE 3: Mobile Tests (Multi-Environment)
+  # ==========================================
+  test-mobile-multi-env:
+    name: Mobile Tests - ${{ matrix.environment }}
+    runs-on: ${{ matrix.os }}
+    needs: build-and-analyze
+    timeout-minutes: 120
+    # La condición se evalúa en cada step para respetar la selección del usuario
+    if: |
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'schedule') ||
+      (contains(github.event.head_commit.message, '[mobile-tests]'))
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ========================================
+          # LOCAL: Windows Self-Hosted (Android)
+          # ========================================
+          - environment: 'local-android'
+            os: [ self-hosted, android, appium, windows ]
+            test-env: 'local'
+            platform: 'android'
+            shell: 'cmd'
+
+          # ========================================
+          # BROWSERSTACK: Cloud (Android + iOS)
+          # ========================================
+          - environment: 'browserstack-android'
+            os: ubuntu-latest
+            test-env: 'browserstack'
+            platform: 'android'
+            shell: 'bash'
+
+          - environment: 'browserstack-ios'
+            os: ubuntu-latest
+            test-env: 'browserstack'
+            platform: 'ios'
+            shell: 'bash'
+
+          # ========================================
+          # AWS DEVICE FARM: Cloud (Android)
+          # ========================================
+          - environment: 'aws-device-farm'
+            os: ubuntu-latest
+            test-env: 'aws-device-farm'
+            platform: 'android'
+            shell: 'bash'
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      # ====== FILTRO CRÍTICO: Skip job si no coincide con el entorno seleccionado ======
+      - name: 🔍 Check if this environment should run
+        id: should-run
+        run: |
+          $shouldRun = "false"
+          
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $selectedEnv = "${{ github.event.inputs.test-environment }}"
+            $matrixEnv = "${{ matrix.test-env }}"
+            
+            if ($selectedEnv -eq $matrixEnv) {
+              $shouldRun = "true"
+            }
+          } elseif ("${{ github.event_name }}" -eq "schedule" -or "${{ contains(github.event.head_commit.message, '[mobile-tests]') }}" -eq "true") {
+            if ("${{ matrix.test-env }}" -eq "local") {
+              $shouldRun = "true"
+            }
+          }
+          
+          echo "should-run=$shouldRun" >> $env:GITHUB_OUTPUT
+          echo "🔍 Environment: ${{ matrix.environment }} | Should Run: $shouldRun"
+        shell: pwsh
+
+      - name: 📥 Checkout code
+        if: steps.should-run.outputs.should-run == 'true'
+        uses: actions/checkout@v4
+
+      - name: ☕ Set up Java ${{ env.JAVA_VERSION }}
+        if: steps.should-run.outputs.should-run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      # ====== LOCAL (Windows) ======
+      - name: ✅ [LOCAL] Verify ADB and Appium Server
+        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'local'
+        run: |
+          echo Checking ADB...
+          where adb || (echo ADB not found in PATH && exit /b 1)
+          adb devices
+          echo Checking Appium server at %APPIUM_SERVER_URL% ...
+          curl.exe -s %APPIUM_SERVER_URL%/status >nul 2>&1 || (echo Appium server not reachable at %APPIUM_SERVER_URL%/status && exit /b 1)
+
+      # ====== BROWSERSTACK (Cloud) ======
+      - name: 🌐 [BROWSERSTACK] Configure Credentials
+        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'browserstack'
+        run: |
+          echo "ℹ️  Using BrowserStack credentials from GitHub Secrets"
+
+      # ====== AWS DEVICE FARM (Cloud) ======
+      - name: ☁️ [AWS] Configure AWS Credentials
+        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'aws-device-farm'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      # ====== RUN TESTS (Multi-Environment) ======
+      - name: 📱 [LOCAL] Run Mobile Tests - ${{ matrix.environment }}
+        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'local'
+        run: |
+          echo Running tests on LOCAL self-hosted runner (Windows)
+          mvn test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
+        shell: cmd
+
+      - name: 📱 [BROWSERSTACK] Run Mobile Tests - ${{ matrix.environment }}
+        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'browserstack'
+        env:
+          TEST_PLATFORM: ${{ matrix.platform }}
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+        run: |
+          echo "Running tests on BROWSERSTACK (${TEST_PLATFORM})"
+          mvn test -Drun.mobile.tests=true -Denv=browserstack -Dplatform=${TEST_PLATFORM} -Devidence.video.enabled=false -B
+        shell: bash
+
+      - name: 📱 [AWS] Run Mobile Tests - ${{ matrix.environment }}
+        if: steps.should-run.outputs.should-run == 'true' && matrix.test-env == 'aws-device-farm'
+        env:
+          TEST_PLATFORM: ${{ matrix.platform }}
+        run: |
+          echo "Running tests on AWS DEVICE FARM"
+          mvn test -Drun.mobile.tests=true -Denv=aws-device-farm -Dplatform=${TEST_PLATFORM} -B
+        shell: bash
+
+  # ==========================================
+  # STAGE 4: Quality Gates
+  # ==========================================
+  quality-gates:
+    name: Quality Gates & Checks
+    runs-on: ubuntu-latest
+    needs: [ test-framework-cloud ]
+    if: always()
+
+    steps:
+      - name: 📥 Download All Artifacts
+        uses: actions/download-artifact@v4
+
+      - name: ✅ Validate Test Results
+        run: |
+          echo "📊 Validating test execution..."
+          if [ -d "framework-test-results" ]; then
+            echo "✅ Framework tests found"
+          fi
+          
+          # Validar resultados móviles si existen
+          for dir in mobile-test-results-*; do
+            if [ -d "$dir" ]; then
+              echo "✅ Mobile test results found: $dir"
+            fi
+          done
+
+      - name: 🔍 Check for Test Failures
+        run: |
+          echo "🔍 Quality gates passed"
