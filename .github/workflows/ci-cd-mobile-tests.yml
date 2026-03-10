@@ -200,6 +200,19 @@ jobs:
           )
           echo Appium server is running
 
+      - name: CI Context Snapshot
+        if: always()
+        shell: cmd
+        run: |
+          mkdir target\ci-logs 2>nul
+          echo RUN_ID=${{ github.run_id }} > target\ci-logs\context.txt
+          echo RUNNER_OS=%RUNNER_OS% >> target\ci-logs\context.txt
+          echo RUNNER_NAME=%RUNNER_NAME% >> target\ci-logs\context.txt
+          java -version >> target\ci-logs\context.txt 2>&1
+          call "%MVN_CMD%" -version >> target\ci-logs\context.txt 2>&1
+          adb devices >> target\ci-logs\context.txt 2>&1
+          curl.exe -s %APPIUM_SERVER_URL%/status > target\ci-logs\appium-status.json 2>&1
+
       - name: Run Mobile Tests - local
         shell: cmd
         run: |
@@ -207,17 +220,27 @@ jobs:
             echo ERROR: MVN_CMD is empty.
             exit /b 1
           )
-          call "%MVN_CMD%" test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
+          mkdir target\ci-logs 2>nul
+          call "%MVN_CMD%" test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -V -e -B > target\ci-logs\mobile-maven.log 2>&1
+          if errorlevel 1 (
+            echo ===== LAST 200 LINES OF MAVEN LOG =====
+            powershell -NoProfile -Command "Get-Content 'target\ci-logs\mobile-maven.log' -Tail 200"
+            exit /b 1
+          )
 
       - name: Upload Mobile Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mobile-test-results-local-android
+          if-no-files-found: warn
           path: |
             target/allure-results/
             target/cucumber-reports/
             target/surefire-reports/
+            target/ci-logs/
+            target/screenshots/
+            target/videos/
           retention-days: 30
 
   # ============================================================
@@ -240,28 +263,44 @@ jobs:
           path: downloaded-results
 
       - name: Install Allure CLI
+        continue-on-error: true
         run: |
-          wget -qO allure.tgz https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.tgz
-          tar -xzf allure.tgz
-          sudo mv allure-2.29.0 /opt/allure
-          sudo ln -s /opt/allure/bin/allure /usr/local/bin/allure
-          allure --version
+          if wget -qO allure.tgz https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.tgz \
+             && tar -xzf allure.tgz \
+             && sudo mv allure-2.29.0 /opt/allure \
+             && sudo ln -sf /opt/allure/bin/allure /usr/local/bin/allure; then
+            echo "ALLURE_CLI_READY=true" >> $GITHUB_ENV
+            allure --version || true
+          else
+            echo "ALLURE_CLI_READY=false" >> $GITHUB_ENV
+            echo "::warning::No se pudo instalar Allure CLI. Se continuará sin romper el workflow."
+          fi
 
       - name: Generate Allure HTML Report
+        continue-on-error: true
         run: |
           RESULTS_DIR="downloaded-results/allure-results"
-          if [ -d "$RESULTS_DIR" ]; then
-            allure generate "$RESULTS_DIR" --clean -o allure-report
+          if [ "${ALLURE_CLI_READY:-false}" != "true" ]; then
+            echo "ALLURE_GENERATED=false" >> $GITHUB_ENV
+            echo "ALLURE_SKIP_REASON=No se pudo instalar Allure CLI en esta ejecución." >> $GITHUB_ENV
+            echo "::warning::No se generó Allure HTML porque Allure CLI no está disponible."
+            exit 0
+          fi
+
+          if [ -d "$RESULTS_DIR" ] && allure generate "$RESULTS_DIR" --clean -o allure-report; then
             echo "ALLURE_GENERATED=true" >> $GITHUB_ENV
+            echo "ALLURE_SKIP_REASON=" >> $GITHUB_ENV
             echo "✅ Allure report generated"
           else
             echo "ALLURE_GENERATED=false" >> $GITHUB_ENV
-            echo "⚠️ No allure-results found in artifact"
+            echo "ALLURE_SKIP_REASON=No existe allure-results o fallo la generación de HTML." >> $GITHUB_ENV
+            echo "::warning::No se pudo generar Allure HTML. Revisa artifact/raw results."
             ls -la downloaded-results/ || true
           fi
 
       - name: Upload Full Allure HTML Report as Artifact
         if: env.ALLURE_GENERATED == 'true'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: allure-html-report-run-${{ github.run_number }}
@@ -270,6 +309,7 @@ jobs:
 
       - name: Publish Allure Report to Surge.sh
         if: env.ALLURE_GENERATED == 'true'
+        continue-on-error: true
         shell: bash
         env:
           SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
@@ -278,19 +318,44 @@ jobs:
           if [ -z "$SURGE_TOKEN" ] || [ -z "$SURGE_DOMAIN" ]; then
             echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
             echo "SURGE_SKIP_REASON=Faltan SURGE_TOKEN y/o SURGE_DOMAIN (secret o variable)." >> $GITHUB_ENV
-            echo "⚠️ Surge no configurado (faltan SURGE_TOKEN o SURGE_DOMAIN)."
+            echo "::warning::Surge no configurado (faltan SURGE_TOKEN o SURGE_DOMAIN)."
             exit 0
           fi
 
-          DOMAIN="$(printf '%s' "$SURGE_DOMAIN" | sed -E 's#^https?://##')"
+          DOMAIN="$(printf '%s' "$SURGE_DOMAIN" | sed -E 's#^https?://##; s#/$##')"
+          if [ -z "$DOMAIN" ]; then
+            echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
+            echo "SURGE_SKIP_REASON=SURGE_DOMAIN esta vacio o invalido tras normalizacion." >> $GITHUB_ENV
+            echo "::warning::SURGE_DOMAIN inválido tras normalización."
+            exit 0
+          fi
 
           npm install -g surge
-          surge ./allure-report "$DOMAIN" --token "$SURGE_TOKEN"
+          if ! surge ./allure-report "$DOMAIN" --token "$SURGE_TOKEN"; then
+            echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
+            echo "SURGE_SKIP_REASON=El comando surge fallo al publicar el reporte." >> $GITHUB_ENV
+            echo "::warning::Fallo publicación en Surge."
+            exit 0
+          fi
+
+          SURGE_URL="https://$DOMAIN"
+          HTTP_STATUS="$(curl -s -o /tmp/surge_page.html -w '%{http_code}' "$SURGE_URL" || true)"
+          PAGE_TITLE="$(grep -oPm1 '(?<=<title>).*?(?=</title>)' /tmp/surge_page.html || true)"
+
+          echo "SURGE_URL=$SURGE_URL" >> $GITHUB_ENV
+          echo "SURGE_HTTP_STATUS=${HTTP_STATUS:-N/A}" >> $GITHUB_ENV
+          echo "SURGE_PAGE_TITLE=${PAGE_TITLE:-N/A}" >> $GITHUB_ENV
+
+          if [ "$HTTP_STATUS" != "200" ] || echo "$PAGE_TITLE" | grep -qi "Unavailable"; then
+            echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
+            echo "SURGE_SKIP_REASON=Surge publico URL pero responde con estado/titulo no valido (status=$HTTP_STATUS, title=${PAGE_TITLE:-N/A})." >> $GITHUB_ENV
+            echo "::warning::URL de Surge accesible pero sin contenido Allure válido."
+            exit 0
+          fi
 
           echo "SURGE_PUBLISHED=true" >> $GITHUB_ENV
-          echo "SURGE_URL=https://$DOMAIN" >> $GITHUB_ENV
           echo "SURGE_SKIP_REASON=" >> $GITHUB_ENV
-          echo "✅ Reporte publicado en https://$DOMAIN"
+          echo "✅ Reporte publicado en $SURGE_URL"
 
       - name: Parse Results and Build Job Summary
         run: |
@@ -350,6 +415,11 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "👉 **[Abrir reporte Allure en Surge](${SURGE_URL})**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Check | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| HTTP Status | ${SURGE_HTTP_STATUS:-N/A} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Page Title | ${SURGE_PAGE_TITLE:-N/A} |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             echo "> El reporte se reemplaza con cada nueva ejecución manual del pipeline self-hosted." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           else
@@ -358,3 +428,17 @@ jobs:
           fi
 
           echo "> 💡 **Para ver el reporte completo:** Puedes usar el enlace de Artifacts de arriba, descargar \`allure-html-report-run-${{ github.run_number }}\`, descomprimir y abrir \`index.html\`." >> $GITHUB_STEP_SUMMARY
+
+          if [ -n "${ALLURE_SKIP_REASON:-}" ]; then
+            echo "### ⚠️ Warnings de reporte" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- ${ALLURE_SKIP_REASON}" >> $GITHUB_STEP_SUMMARY
+            [ -n "${SURGE_SKIP_REASON:-}" ] && echo "- ${SURGE_SKIP_REASON}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          elif [ -n "${SURGE_SKIP_REASON:-}" ]; then
+            echo "### ⚠️ Warnings de reporte" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- ${SURGE_SKIP_REASON}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
