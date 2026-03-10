@@ -268,6 +268,30 @@ jobs:
           path: allure-report/
           retention-days: 30
 
+      - name: Publish Allure Report to Surge.sh
+        if: env.ALLURE_GENERATED == 'true'
+        shell: bash
+        env:
+          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
+          SURGE_DOMAIN: ${{ secrets.SURGE_DOMAIN }}
+        run: |
+          if [ -z "$SURGE_TOKEN" ] || [ -z "$SURGE_DOMAIN" ]; then
+            echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
+            echo "⚠️ Surge no configurado (faltan secrets SURGE_TOKEN o SURGE_DOMAIN)."
+            exit 0
+          fi
+
+          DOMAIN="$SURGE_DOMAIN"
+          DOMAIN="${DOMAIN#https://}"
+          DOMAIN="${DOMAIN#http://}"
+
+          npm install -g surge
+          surge ./allure-report "$DOMAIN" --token "$SURGE_TOKEN"
+
+          echo "SURGE_PUBLISHED=true" >> $GITHUB_ENV
+          echo "SURGE_URL=https://$DOMAIN" >> $GITHUB_ENV
+          echo "✅ Reporte publicado en https://$DOMAIN"
+
       - name: Parse Results and Build Job Summary
         run: |
           echo "## 📊 Mobile Test Report - Self Hosted" >> $GITHUB_STEP_SUMMARY
@@ -318,5 +342,15 @@ jobs:
           echo "- 📦 **allure-html-report-run-${{ github.run_number }}**: Reporte HTML completo de Allure (descargable desde la sección Artifacts de esta ejecución)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 **mobile-test-results-local-android**: Resultados raw (allure-results, cucumber, surefire)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${SURGE_PUBLISHED:-false}" = "true" ]; then
+            echo "### 🌐 Reporte online (gratis)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "👉 **[Abrir reporte Allure en Surge](${SURGE_URL})**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> El reporte se reemplaza con cada nueva ejecución manual del pipeline self-hosted." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
           echo "> 💡 **Para ver el reporte completo:** Descarga el artifact \`allure-html-report-run-${{ github.run_number }}\`, descomprime y abre \`index.html\` en tu navegador." >> $GITHUB_STEP_SUMMARY
 
