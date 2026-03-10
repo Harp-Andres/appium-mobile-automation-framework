@@ -205,6 +205,7 @@ jobs:
         if: matrix.test-env == 'local'
         shell: powershell
         run: |
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
           Write-Host "Checking ADB and Appium Server..."
 
           # Build ordered candidates to locate adb.exe without hardcoding a single user path.
@@ -287,6 +288,7 @@ jobs:
         if: matrix.test-env == 'local'
         shell: powershell
         run: |
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
           Write-Host "Using ADB_BIN=$env:ADB_BIN"
           Write-Host "Using ANDROID_HOME=$env:ANDROID_HOME"
           mvn test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
