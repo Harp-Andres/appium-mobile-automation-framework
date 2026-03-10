@@ -1,6 +1,10 @@
-name: Mobile Tests - Self Hosted
+name: 🖥️🤖 Mobile Tests - Self Hosted
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -12,10 +16,50 @@ env:
   APPIUM_SERVER_URL: 'http://127.0.0.1:4723'
 
 jobs:
+  # ============================================================
+  # Sanity tests: corren en ubuntu en push/PR, sin dispositivo
+  # ============================================================
+  sanity-tests:
+    name: Sanity Tests (framework health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Solo corre en push/PR automático, NO en dispatch manual
+    if: github.event_name != 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Run Sanity Tests (no device required)
+        run: mvn test -Drun.mobile.tests=false -B
+
+      - name: Upload Sanity Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanity-test-results
+          path: |
+            target/allure-results/
+            target/cucumber-reports/
+            target/surefire-reports/
+          retention-days: 14
+
+  # ============================================================
+  # Mobile tests: solo corren con dispatch manual en self-hosted
+  # ============================================================
   mobile-tests-local-android:
     name: Mobile Tests - local-android
     runs-on: [self-hosted, android, appium, windows]
     timeout-minutes: 120
+    # Solo corre cuando se dispara manualmente
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout code

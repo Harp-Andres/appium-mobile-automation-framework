@@ -1,6 +1,10 @@
-name: Mobile Tests - AWS Device Farm
+name: ☁️🚀 Mobile Tests - AWS Device Farm
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       platform:
@@ -20,10 +24,48 @@ env:
   AWS_REGION: 'us-east-1'
 
 jobs:
+  # ============================================================
+  # Sanity tests: corren en ubuntu en push/PR, sin dispositivo
+  # ============================================================
+  sanity-tests:
+    name: Sanity Tests (framework health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name != 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Run Sanity Tests (no device required)
+        run: mvn test -Drun.mobile.tests=false -B
+
+      - name: Upload Sanity Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanity-test-results-aws
+          path: |
+            target/allure-results/
+            target/cucumber-reports/
+            target/surefire-reports/
+          retention-days: 14
+
+  # ============================================================
+  # Mobile tests: solo corren con dispatch manual en AWS
+  # ============================================================
   mobile-tests-aws-device-farm:
     name: Mobile Tests - aws-device-farm-${{ github.event.inputs.platform }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout code
