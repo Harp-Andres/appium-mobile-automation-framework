@@ -203,30 +203,65 @@ jobs:
 
       - name: ✅ [LOCAL] Verify ADB and Appium Server
         if: matrix.test-env == 'local'
-        shell: cmd
+        shell: powershell
         run: |
-          echo Checking ADB and Appium Server...
-          
-          REM Path to ADB (using actual Android SDK location)
-          set "ADB_BIN=C:\Users\ANDRE\AppData\Local\Android\platform-tools\adb.exe"
-          
-          if not exist "%ADB_BIN%" (
-            echo ERROR: ADB not found at %ADB_BIN%
-            echo Android SDK location: C:\Users\ANDRE\AppData\Local\Android
-            exit /b 1
-          )
-          
-          echo ✅ ADB found: %ADB_BIN%
-          "%ADB_BIN%" start-server
-          "%ADB_BIN%" devices
-          
-          echo Checking Appium server at %APPIUM_SERVER_URL%...
-          curl.exe -s %APPIUM_SERVER_URL%/status
-          if errorlevel 1 (
-            echo ERROR: Appium server not reachable at %APPIUM_SERVER_URL%
-            exit /b 1
-          )
-          echo ✅ Appium server is running
+          Write-Host "Checking ADB and Appium Server..."
+
+          # Build ordered candidates to locate adb.exe without hardcoding a single user path.
+          $candidates = @()
+          if ($env:ADB_BIN) { $candidates += $env:ADB_BIN }
+          if ($env:ANDROID_HOME) { $candidates += (Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe') }
+          if ($env:ANDROID_SDK_ROOT) { $candidates += (Join-Path $env:ANDROID_SDK_ROOT 'platform-tools\adb.exe') }
+          $candidates += (Join-Path $env:USERPROFILE 'AppData\Local\Android\Sdk\platform-tools\adb.exe')
+
+          $adbFromPath = (Get-Command adb -ErrorAction SilentlyContinue).Source
+          if ($adbFromPath) { $candidates += $adbFromPath }
+
+          $adb = $null
+          foreach ($item in $candidates | Select-Object -Unique) {
+            if ($item -and (Test-Path $item)) {
+              $adb = $item
+              break
+            }
+          }
+
+          if (-not $adb) {
+            Write-Host "ERROR: adb.exe not found."
+            Write-Host "Checked candidates:"
+            $candidates | Select-Object -Unique | ForEach-Object { Write-Host " - $_" }
+            Write-Host "USERPROFILE=$env:USERPROFILE"
+            Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
+            Write-Host "ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT"
+            exit 1
+          }
+
+          $platformTools = Split-Path -Parent $adb
+          $sdkRoot = Split-Path -Parent $platformTools
+
+          "ADB_BIN=$adb" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ANDROID_HOME=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ANDROID_SDK_ROOT=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $platformTools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          Write-Host "ADB found: $adb"
+          & $adb start-server
+          & $adb devices
+
+          Write-Host "Checking Appium server at $env:APPIUM_SERVER_URL..."
+          try {
+            $response = Invoke-WebRequest -Uri "$env:APPIUM_SERVER_URL/status" -UseBasicParsing -TimeoutSec 10
+            if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+              Write-Host "ERROR: Appium server returned status code $($response.StatusCode)"
+              exit 1
+            }
+          }
+          catch {
+            Write-Host "ERROR: Appium server not reachable at $env:APPIUM_SERVER_URL"
+            Write-Host $_.Exception.Message
+            exit 1
+          }
+
+          Write-Host "Appium server is running"
 
       - name: 🌐 [BROWSERSTACK] Configure Credentials
         if: matrix.test-env == 'browserstack'
@@ -250,8 +285,11 @@ jobs:
 
       - name: 📱 [LOCAL] Run Mobile Tests - ${{ matrix.environment }}
         if: matrix.test-env == 'local'
-        shell: cmd
-        run: mvn test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
+        shell: powershell
+        run: |
+          Write-Host "Using ADB_BIN=$env:ADB_BIN"
+          Write-Host "Using ANDROID_HOME=$env:ANDROID_HOME"
+          mvn test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
 
       - name: 📱 [BROWSERSTACK] Run Mobile Tests - ${{ matrix.environment }}
         if: matrix.test-env == 'browserstack'
