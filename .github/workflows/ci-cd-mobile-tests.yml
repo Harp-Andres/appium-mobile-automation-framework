@@ -201,11 +201,33 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: 🔧 Setup Maven for Self-Hosted Runner
+      - name: 🔧 Setup Maven for Windows Self-Hosted
         if: matrix.test-env == 'local'
-        uses: stCarolas/setup-maven@v5
-        with:
-          maven-version: ${{ env.MAVEN_VERSION }}
+        shell: cmd
+        run: |
+          echo Setting up Maven...
+          setlocal enabledelayedexpansion
+          set "MVN_CMD="
+
+          REM Prioridad: ruta local confirmada por el equipo
+          if exist "C:\apache-maven-3.9.9\bin\mvn.cmd" (
+            set "MVN_CMD=C:\apache-maven-3.9.9\bin\mvn.cmd"
+          )
+
+          REM Fallback: resolver desde PATH del servicio del runner
+          if not defined MVN_CMD (
+            for %%X in (mvn.cmd) do if not "%%~$PATH:X"=="" set "MVN_CMD=%%~$PATH:X"
+          )
+
+          if not defined MVN_CMD (
+            echo ERROR: Maven not found.
+            echo Tried: C:\apache-maven-3.9.9\bin\mvn.cmd and PATH
+            exit /b 1
+          )
+
+          echo Maven found: !MVN_CMD!
+          echo MVN_CMD=!MVN_CMD!>> %GITHUB_ENV%
+          call "!MVN_CMD!" -version
 
       - name: 🔧 Setup Java 17 for Windows Self-Hosted
         if: matrix.test-env == 'local'
@@ -334,7 +356,12 @@ jobs:
       - name: 📱 [LOCAL] Run Mobile Tests - ${{ matrix.environment }}
         if: matrix.test-env == 'local'
         shell: cmd
-        run: mvn test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
+        run: |
+          if "%MVN_CMD%"=="" (
+            echo ERROR: MVN_CMD is empty.
+            exit /b 1
+          )
+          call "%MVN_CMD%" test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -B
 
       - name: 📱 [BROWSERSTACK] Run Mobile Tests - ${{ matrix.environment }}
         if: matrix.test-env == 'browserstack'
