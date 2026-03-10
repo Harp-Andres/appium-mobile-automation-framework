@@ -1,0 +1,79 @@
+name: Mobile Tests - BrowserStack
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to run in BrowserStack
+        required: true
+        default: android
+        type: choice
+        options:
+          - android
+          - ios
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: '17'
+
+jobs:
+  mobile-tests-browserstack:
+    name: Mobile Tests - browserstack-${{ github.event.inputs.platform }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Verify BrowserStack credentials
+        shell: bash
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+        run: |
+          if [ -z "$BROWSERSTACK_USERNAME" ] || [ -z "$BROWSERSTACK_ACCESS_KEY" ]; then
+            echo "ERROR: BrowserStack credentials not found in repository secrets"
+            exit 1
+          fi
+
+      - name: Run Mobile Tests - BrowserStack
+        shell: bash
+        env:
+          TEST_PLATFORM: ${{ github.event.inputs.platform }}
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+        run: mvn test -Drun.mobile.tests=true -Denv=browserstack -Dplatform=${TEST_PLATFORM} -Devidence.video.enabled=false -B
+
+      - name: Upload BrowserStack Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-test-results-browserstack-${{ github.event.inputs.platform }}
+          path: |
+            target/allure-results/
+            target/cucumber-reports/
+            target/surefire-reports/
+            target/videos/
+            target/screenshots/
+          retention-days: 30
+
+      - name: Report guidance summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## BrowserStack - Reportes"
+            echo "- Fuente principal recomendada: BrowserStack Automate/App Automate Dashboard."
+            echo "- Respaldo en GitHub: artifact mobile-test-results-browserstack-${{ github.event.inputs.platform }}."
+            echo "- Retencion recomendada: 14-30 dias en GitHub artifacts y 30-60 dias en BrowserStack segun plan contratado."
+          } >> "$GITHUB_STEP_SUMMARY"
