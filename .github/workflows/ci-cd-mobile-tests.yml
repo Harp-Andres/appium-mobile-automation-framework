@@ -220,10 +220,10 @@ jobs:
           retention-days: 30
 
   # ============================================================
-  # Publish Allure Report to GitHub Pages (solo manual, tras mobile)
+  # Publish Allure Report as GitHub Actions Job Summary
   # ============================================================
   publish-report:
-    name: Publish Allure Report to GitHub Pages
+    name: 📊 Generate & Publish Test Report
     needs: [ mobile-tests-local-android ]
     runs-on: ubuntu-latest
     if: always() && github.event_name == 'workflow_dispatch' && needs['mobile-tests-local-android'].result != 'skipped'
@@ -236,13 +236,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: mobile-test-results-local-android
-          path: allure-results
-
-      - name: Set up Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: temurin
+          path: downloaded-results
 
       - name: Install Allure CLI
         run: |
@@ -254,23 +248,74 @@ jobs:
 
       - name: Generate Allure HTML Report
         run: |
-          allure generate allure-results/allure-results --clean -o allure-report
-          echo "✅ Allure report generated"
-          ls -la allure-report/
+          RESULTS_DIR="downloaded-results/allure-results"
+          if [ -d "$RESULTS_DIR" ]; then
+            allure generate "$RESULTS_DIR" --clean -o allure-report
+            echo "ALLURE_GENERATED=true" >> $GITHUB_ENV
+            echo "✅ Allure report generated"
+          else
+            echo "ALLURE_GENERATED=false" >> $GITHUB_ENV
+            echo "⚠️ No allure-results found in artifact"
+            ls -la downloaded-results/ || true
+          fi
 
-      - name: Publish to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Upload Full Allure HTML Report as Artifact
+        if: env.ALLURE_GENERATED == 'true'
+        uses: actions/upload-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: allure-report
-          publish_branch: gh-pages
-          force_orphan: true
-          commit_message: "chore: update Allure report - Self Hosted run #${{ github.run_number }}"
+          name: allure-html-report-run-${{ github.run_number }}
+          path: allure-report/
+          retention-days: 30
 
-      - name: Report URL summary
+      - name: Parse Results and Build Job Summary
         run: |
-          echo "## 📊 Allure Report Published" >> $GITHUB_STEP_SUMMARY
-          echo "🔗 **URL:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
-          echo "🏃 **Run:** #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
-          echo "📅 **Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Mobile Test Report - Self Hosted" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏃 Run | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📅 Date | $(date '+%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌿 Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 👤 Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 💻 Runner | Self-Hosted Windows (local-android) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Parsear resultados de surefire XML si existen
+          SUREFIRE_DIR="downloaded-results/surefire-reports"
+          if ls "$SUREFIRE_DIR"/*.xml 1>/dev/null 2>&1; then
+            TOTAL=$(grep -h 'tests=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'tests="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            FAILURES=$(grep -h 'failures=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'failures="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            ERRORS=$(grep -h 'errors=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'errors="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            SKIPPED=$(grep -h 'skipped=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'skipped="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            TOTAL=${TOTAL:-0}; FAILURES=${FAILURES:-0}; ERRORS=${ERRORS:-0}; SKIPPED=${SKIPPED:-0}
+            PASSED=$((TOTAL - FAILURES - ERRORS - SKIPPED))
+            if [ "$FAILURES" -eq 0 ] && [ "$ERRORS" -eq 0 ]; then STATUS="✅ PASSED"; else STATUS="❌ FAILED"; fi
+
+            echo "### 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Status | Tests | ✅ Passed | ❌ Failed | ⚠️ Errors | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|-----------|-----------|-----------|------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| $STATUS | $TOTAL | $PASSED | $FAILURES | $ERRORS | $SKIPPED |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Parsear cucumber JSON si existe
+          CUCUMBER_JSON="downloaded-results/cucumber-reports/cucumber.json"
+          if [ -f "$CUCUMBER_JSON" ]; then
+            SCENARIOS=$(python3 -c "import json,sys; d=json.load(open('$CUCUMBER_JSON')); print(sum(len(f.get('elements',[])) for f in d))" 2>/dev/null || echo "N/A")
+            PASSED_SC=$(python3 -c "import json,sys; d=json.load(open('$CUCUMBER_JSON')); print(sum(1 for f in d for e in f.get('elements',[]) if all(s.get('result',{}).get('status')=='passed' for s in e.get('steps',[]))))" 2>/dev/null || echo "N/A")
+            echo "### 🥒 Cucumber Scenarios" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Scenarios | Passed |" >> $GITHUB_STEP_SUMMARY
+            echo "|-----------------|--------|" >> $GITHUB_STEP_SUMMARY
+            echo "| $SCENARIOS | $PASSED_SC |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### 📁 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **allure-html-report-run-${{ github.run_number }}**: Reporte HTML completo de Allure (descargable desde la sección Artifacts de esta ejecución)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **mobile-test-results-local-android**: Resultados raw (allure-results, cucumber, surefire)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> 💡 **Para ver el reporte completo:** Descarga el artifact \`allure-html-report-run-${{ github.run_number }}\`, descomprime y abre \`index.html\` en tu navegador." >> $GITHUB_STEP_SUMMARY
 
