@@ -208,15 +208,15 @@ jobs:
           echo Checking ADB and Appium Server...
           
           REM Path to ADB (using actual Android SDK location)
-          set "ADB_BIN=C:\Users\ANDRE\AppData\Local\Android\platform-tools\adb.exe"
+          set "ADB_BIN=C:\Users\ANDRE\AppData\Local\Android\Sdk\platform-tools\adb.exe"
           
           if not exist "%ADB_BIN%" (
             echo ERROR: ADB not found at %ADB_BIN%
-            echo Android SDK location: C:\Users\ANDRE\AppData\Local\Android
+            echo Android SDK location: C:\Users\ANDRE\AppData\Local\Android\Sdk
             exit /b 1
           )
           
-          echo ✅ ADB found: %ADB_BIN%
+          echo ADB found: %ADB_BIN%
           "%ADB_BIN%" start-server
           "%ADB_BIN%" devices
           
@@ -226,7 +226,7 @@ jobs:
             echo ERROR: Appium server not reachable at %APPIUM_SERVER_URL%
             exit /b 1
           )
-          echo ✅ Appium server is running
+          echo Appium server is running
 
       - name: 🌐 [BROWSERSTACK] Configure Credentials
         if: matrix.test-env == 'browserstack'
