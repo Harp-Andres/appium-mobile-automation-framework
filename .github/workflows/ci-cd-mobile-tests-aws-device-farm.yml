@@ -105,8 +105,6 @@ jobs:
             target/allure-results/
             target/cucumber-reports/
             target/surefire-reports/
-            target/videos/
-            target/screenshots/
           retention-days: 30
 
       - name: 📊 Job Summary - AWS Device Farm Console
@@ -135,26 +133,3 @@ jobs:
             echo "### 📁 Artifact de respaldo"
             echo "- 📦 **mobile-test-results-aws-device-farm-${{ github.event.inputs.platform }}**: allure-results, cucumber y surefire (descargable desde Artifacts de esta ejecución)"
           } >> "$GITHUB_STEP_SUMMARY"
-
-
-          SUREFIRE_DIR="downloaded-results/surefire-reports"
-          if ls "$SUREFIRE_DIR"/*.xml 1>/dev/null 2>&1; then
-            TOTAL=$(grep -h 'tests=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'tests="\K[0-9]+' | awk '{s+=$1}END{print s}')
-            FAILURES=$(grep -h 'failures=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'failures="\K[0-9]+' | awk '{s+=$1}END{print s}')
-            ERRORS=$(grep -h 'errors=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'errors="\K[0-9]+' | awk '{s+=$1}END{print s}')
-            SKIPPED=$(grep -h 'skipped=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'skipped="\K[0-9]+' | awk '{s+=$1}END{print s}')
-            TOTAL=${TOTAL:-0}; FAILURES=${FAILURES:-0}; ERRORS=${ERRORS:-0}; SKIPPED=${SKIPPED:-0}
-            PASSED=$((TOTAL - FAILURES - ERRORS - SKIPPED))
-            if [ "$FAILURES" -eq 0 ] && [ "$ERRORS" -eq 0 ]; then STATUS="✅ PASSED"; else STATUS="❌ FAILED"; fi
-            echo "### 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Status | Tests | ✅ Passed | ❌ Failed | ⚠️ Errors | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|-------|-----------|-----------|-----------|------------|" >> $GITHUB_STEP_SUMMARY
-            echo "| $STATUS | $TOTAL | $PASSED | $FAILURES | $ERRORS | $SKIPPED |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "### 📁 Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- 📦 **allure-html-report-aws-${{ github.event.inputs.platform }}-run-${{ github.run_number }}**: Reporte HTML completo de Allure" >> $GITHUB_STEP_SUMMARY
-          echo "> 💡 Descarga el artifact, descomprime y abre \`index.html\` en tu navegador." >> $GITHUB_STEP_SUMMARY
-
