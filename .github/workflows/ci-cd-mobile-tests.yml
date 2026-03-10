@@ -17,14 +17,13 @@ env:
 
 jobs:
   # ============================================================
-  # Sanity tests: corren en ubuntu en push/PR, sin dispositivo
+  # Sanity tests: corren siempre primero (push/PR y manual)
   # ============================================================
   sanity-tests:
     name: Sanity Tests (framework health)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Solo corre en push/PR automático, NO en dispatch manual
-    if: github.event_name != 'workflow_dispatch'
+    # Corre siempre: push, PR y workflow_dispatch
 
     steps:
       - name: Checkout code
@@ -52,14 +51,15 @@ jobs:
           retention-days: 14
 
   # ============================================================
-  # Mobile tests: solo corren con dispatch manual en self-hosted
+  # Mobile tests: solo manual y solo si sanity fue exitoso
   # ============================================================
   mobile-tests-local-android:
     name: Mobile Tests - local-android
+    needs: [ sanity-tests ]
     runs-on: [self-hosted, android, appium, windows]
     timeout-minutes: 120
     # Solo corre cuando se dispara manualmente
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success'
 
     steps:
       - name: Checkout code
