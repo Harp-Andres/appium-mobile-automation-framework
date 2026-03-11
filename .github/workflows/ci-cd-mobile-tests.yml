@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       project_id:
-        description: "Identificador del proyecto en el repo de reportes (ej: appium-cucumber-base)"
+        description: "Opcional: identificador del proyecto en reportes (si se omite, usa automaticamente el nombre del repositorio)"
         required: false
-        default: "appium-cucumber-base"
+        default: ""
 
 permissions:
   contents: write
