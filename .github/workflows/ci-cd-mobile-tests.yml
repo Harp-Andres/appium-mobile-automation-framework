@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Identificador del proyecto en el repo de reportes (ej: appium-cucumber-base)"
+        required: false
+        default: "appium-cucumber-base"
 
 permissions:
   contents: write
@@ -255,11 +260,6 @@ jobs:
     if: always() && github.event_name == 'workflow_dispatch' && needs['mobile-tests-local-android'].result != 'skipped'
     permissions:
       contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout code
@@ -316,25 +316,90 @@ jobs:
           path: allure-report/
           retention-days: 30
 
-      - name: Configure GitHub Pages
+      - name: Publish Allure Report to public reports repo
         if: env.ALLURE_GENERATED == 'true'
-        uses: actions/configure-pages@v5
+        env:
+          REPORTS_REPO_PAT: ${{ secrets.REPORTS_REPO_PAT }}
+          REPORTS_REPO: Harp-Andres/automation-test-reports
+        run: |
+          set -e
 
-      - name: Upload GitHub Pages Artifact
-        if: env.ALLURE_GENERATED == 'true'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: allure-report/
+          if [ -z "${REPORTS_REPO_PAT:-}" ]; then
+            echo "REPORTS_PUBLISHED=false" >> "$GITHUB_ENV"
+            echo "REPORTS_SKIP_REASON=Falta el secret REPORTS_REPO_PAT en este repositorio." >> "$GITHUB_ENV"
+            echo "::warning::No se publicó online: falta REPORTS_REPO_PAT."
+            exit 0
+          fi
 
-      - name: Deploy to GitHub Pages
-        if: env.ALLURE_GENERATED == 'true'
-        id: deployment
-        uses: actions/deploy-pages@v4
+          PROJECT_INPUT="${{ github.event.inputs.project_id }}"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          if [ -z "$PROJECT_INPUT" ]; then
+            PROJECT_INPUT="$REPO_NAME"
+          fi
+          PROJECT_ID="$(printf '%s' "$PROJECT_INPUT" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+          if [ -z "$PROJECT_ID" ]; then
+            PROJECT_ID="$REPO_NAME"
+          fi
+
+          RUN_DIR="$PROJECT_ID/runs/${{ github.run_number }}"
+          LATEST_DIR="$PROJECT_ID/latest"
+
+          echo "REPORT_PROJECT_ID=$PROJECT_ID" >> "$GITHUB_ENV"
+          echo "PUBLIC_REPORT_URL=https://harp-andres.github.io/automation-test-reports/$LATEST_DIR/" >> "$GITHUB_ENV"
+          echo "PUBLIC_REPORT_RUN_URL=https://harp-andres.github.io/automation-test-reports/$RUN_DIR/" >> "$GITHUB_ENV"
+
+          AUTH_URL="https://x-access-token:${REPORTS_REPO_PAT}@github.com/${REPORTS_REPO}.git"
+
+          mkdir -p reports-repo
+          cd reports-repo
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "$AUTH_URL"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch --depth 1 origin gh-pages
+            git checkout -B gh-pages FETCH_HEAD
+          else
+            git checkout --orphan gh-pages
+          fi
+
+          mkdir -p "$RUN_DIR" "$LATEST_DIR"
+          rm -rf "$RUN_DIR"/* "$LATEST_DIR"/*
+          cp -R ../allure-report/. "$RUN_DIR/"
+          cp -R ../allure-report/. "$LATEST_DIR/"
+
+          {
+            echo "source_repo=${GITHUB_REPOSITORY}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "run_number=${GITHUB_RUN_NUMBER}"
+            echo "published_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$RUN_DIR/_meta.txt"
+          cp "$RUN_DIR/_meta.txt" "$LATEST_DIR/_meta.txt"
+
+          git add "$PROJECT_ID"
+          if git diff --cached --quiet; then
+            echo "REPORTS_PUBLISHED=true" >> "$GITHUB_ENV"
+            echo "REPORTS_SKIP_REASON=" >> "$GITHUB_ENV"
+            echo "No hubo cambios de contenido para commitear."
+            exit 0
+          fi
+
+          git commit -m "report: $PROJECT_ID run ${{ github.run_number }}"
+          git push origin gh-pages
+
+          echo "REPORTS_PUBLISHED=true" >> "$GITHUB_ENV"
+          echo "REPORTS_SKIP_REASON=" >> "$GITHUB_ENV"
+          echo "✅ Reporte publicado en repo público: $REPORTS_REPO"
 
       - name: Parse Results and Build Job Summary
         run: |
           RUN_ARTIFACTS_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
-          PAGES_URL="${{ steps.deployment.outputs.page_url }}"
+          PUBLIC_REPORT_URL="${PUBLIC_REPORT_URL:-}"
+          PUBLIC_REPORT_RUN_URL="${PUBLIC_REPORT_RUN_URL:-}"
+          REPORTS_PUBLISHED="${REPORTS_PUBLISHED:-false}"
+          REPORTS_SKIP_REASON="${REPORTS_SKIP_REASON:-}"
+          REPORT_PROJECT_ID="${REPORT_PROJECT_ID:-${{ github.event.repository.name }}}"
           echo "## 📊 Mobile Test Report - Self Hosted" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
@@ -344,6 +409,7 @@ jobs:
           echo "| 🌿 Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 👤 Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 💻 Runner | Self-Hosted Windows (local-android) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧩 Project ID | $REPORT_PROJECT_ID |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Parsear resultados de surefire XML si existen
@@ -385,15 +451,21 @@ jobs:
           echo "- 🔗 **[Abrir sección Artifacts de esta ejecución](${RUN_ARTIFACTS_URL})**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ -n "$PAGES_URL" ]; then
-            echo "### 🌐 Reporte online (GitHub Pages)" >> $GITHUB_STEP_SUMMARY
+          if [ "$REPORTS_PUBLISHED" = "true" ] && [ -n "$PUBLIC_REPORT_URL" ]; then
+            echo "### 🌐 Reporte online (Public Reports Repo)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "👉 **[Abrir reporte Allure en GitHub Pages](${PAGES_URL})**" >> $GITHUB_STEP_SUMMARY
+            echo "👉 **[Abrir reporte latest](${PUBLIC_REPORT_URL})**" >> $GITHUB_STEP_SUMMARY
+            if [ -n "$PUBLIC_REPORT_RUN_URL" ]; then
+              echo "- 🔎 Histórico de esta ejecución: [run ${{ github.run_number }}](${PUBLIC_REPORT_RUN_URL})" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "> El reporte se reemplaza con cada nueva ejecución manual del pipeline self-hosted." >> $GITHUB_STEP_SUMMARY
+            echo "> El reporte latest se reemplaza en cada ejecución; el histórico por run se mantiene." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           else
-            echo "> ℹ️ URL online no disponible: no se pudo desplegar en GitHub Pages en esta ejecución." >> $GITHUB_STEP_SUMMARY
+            echo "> ℹ️ URL online no disponible en esta ejecución." >> $GITHUB_STEP_SUMMARY
+            if [ -n "$REPORTS_SKIP_REASON" ]; then
+              echo "> Motivo: $REPORTS_SKIP_REASON" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
