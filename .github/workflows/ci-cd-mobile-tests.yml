@@ -365,19 +365,17 @@ jobs:
           fi
 
           mkdir -p "$RUN_DIR" "$LATEST_DIR"
-          rm -rf "$RUN_DIR"/* "$LATEST_DIR"/*
+          rm -rf "${RUN_DIR:?}"/* "${LATEST_DIR:?}"/*
           cp -R ../allure-report/. "$RUN_DIR/"
           cp -R ../allure-report/. "$LATEST_DIR/"
 
-          {
-            echo "source_repo=${GITHUB_REPOSITORY}"
-            echo "run_id=${GITHUB_RUN_ID}"
-            echo "run_number=${GITHUB_RUN_NUMBER}"
-            echo "published_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } > "$RUN_DIR/_meta.txt"
+          # Escribir metadata
+          printf 'source_repo=%s\nrun_id=%s\nrun_number=%s\npublished_at_utc=%s\n' \
+            "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_NUMBER}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUN_DIR/_meta.txt"
           cp "$RUN_DIR/_meta.txt" "$LATEST_DIR/_meta.txt"
 
-          # Generar index.html raíz con links a todos los proyectos publicados
+          # Generar index.html raiz con links a todos los proyectos publicados
           PUBLISHED_AT="$(date -u '+%Y-%m-%d %H:%M UTC')"
           {
             echo '<!DOCTYPE html>'
