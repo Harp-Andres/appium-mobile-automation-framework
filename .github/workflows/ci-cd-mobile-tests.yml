@@ -358,8 +358,8 @@ jobs:
           git remote add origin "$AUTH_URL"
 
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-            git fetch --depth 1 origin gh-pages
-            git checkout -B gh-pages FETCH_HEAD
+            git fetch origin gh-pages
+            git checkout -B gh-pages origin/gh-pages
           else
             git checkout --orphan gh-pages
           fi
@@ -377,7 +377,63 @@ jobs:
           } > "$RUN_DIR/_meta.txt"
           cp "$RUN_DIR/_meta.txt" "$LATEST_DIR/_meta.txt"
 
-          git add "$PROJECT_ID"
+          # Generar index.html raíz con links a todos los proyectos publicados
+          PUBLISHED_AT="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          {
+            echo '<!DOCTYPE html>'
+            echo '<html lang="es">'
+            echo '<head>'
+            echo '  <meta charset="UTF-8">'
+            echo '  <meta name="viewport" content="width=device-width, initial-scale=1.0">'
+            echo '  <title>QA Test Reports Hub</title>'
+            echo '  <style>'
+            echo '    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 40px 20px; }'
+            echo '    h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 16px; }'
+            echo '    .project { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin: 16px 0; }'
+            echo '    .project h2 { margin: 0 0 8px 0; color: #58a6ff; font-size: 18px; }'
+            echo '    .project p { margin: 4px 0; color: #8b949e; font-size: 14px; }'
+            echo '    .btn { display: inline-block; margin: 8px 8px 0 0; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; }'
+            echo '    .btn-primary { background: #238636; color: #fff; border: 1px solid #2ea043; }'
+            echo '    .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }'
+            echo '    .btn:hover { opacity: 0.85; }'
+            echo '    footer { margin-top: 40px; color: #484f58; font-size: 12px; }'
+            echo '  </style>'
+            echo '</head>'
+            echo '<body>'
+            echo "  <h1>🧪 QA Test Reports Hub</h1>"
+            echo "  <p>Reportes de automatización publicados automáticamente desde GitHub Actions.</p>"
+
+            # Un bloque por cada carpeta de proyecto encontrada
+            for proj_dir in */; do
+              proj_dir="${proj_dir%/}"
+              [ -f "$proj_dir/latest/index.html" ] || continue
+              latest_url="https://harp-andres.github.io/automation-test-reports-hub/$proj_dir/latest/"
+              runs_count=$(find "$proj_dir/runs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+              meta_file="$proj_dir/latest/_meta.txt"
+              pub_date=""
+              src_repo=""
+              run_num=""
+              if [ -f "$meta_file" ]; then
+                pub_date=$(grep 'published_at_utc=' "$meta_file" | cut -d= -f2)
+                src_repo=$(grep 'source_repo=' "$meta_file" | cut -d= -f2)
+                run_num=$(grep 'run_number=' "$meta_file" | cut -d= -f2)
+              fi
+              echo "  <div class=\"project\">"
+              echo "    <h2>📦 $proj_dir</h2>"
+              [ -n "$src_repo" ] && echo "    <p>🔗 Repositorio: <code>$src_repo</code></p>"
+              [ -n "$run_num" ]  && echo "    <p>🏃 Último run: <strong>#$run_num</strong></p>"
+              [ -n "$pub_date" ] && echo "    <p>📅 Publicado: $pub_date</p>"
+              echo "    <p>📂 Histórico disponible: $runs_count run(s)</p>"
+              echo "    <a class=\"btn btn-primary\" href=\"$latest_url\">🌐 Ver reporte latest</a>"
+              echo "  </div>"
+            done
+
+            echo "  <footer>Actualizado: $PUBLISHED_AT · Generado automáticamente por GitHub Actions</footer>"
+            echo '</body>'
+            echo '</html>'
+          } > index.html
+
+          git add "$PROJECT_ID" index.html
           if git diff --cached --quiet; then
             echo "REPORTS_PUBLISHED=true" >> "$GITHUB_ENV"
             echo "REPORTS_SKIP_REASON=" >> "$GITHUB_ENV"
