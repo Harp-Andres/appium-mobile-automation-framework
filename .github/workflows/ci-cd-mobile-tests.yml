@@ -320,7 +320,7 @@ jobs:
         if: env.ALLURE_GENERATED == 'true'
         env:
           REPORTS_REPO_PAT: ${{ secrets.REPORTS_REPO_PAT }}
-          REPORTS_REPO: Harp-Andres/automation-test-reports
+          REPORTS_REPO: Harp-Andres/automation-test-reports-hub
         run: |
           set -e
 
@@ -345,8 +345,8 @@ jobs:
           LATEST_DIR="$PROJECT_ID/latest"
 
           echo "REPORT_PROJECT_ID=$PROJECT_ID" >> "$GITHUB_ENV"
-          echo "PUBLIC_REPORT_URL=https://harp-andres.github.io/automation-test-reports/$LATEST_DIR/" >> "$GITHUB_ENV"
-          echo "PUBLIC_REPORT_RUN_URL=https://harp-andres.github.io/automation-test-reports/$RUN_DIR/" >> "$GITHUB_ENV"
+          echo "PUBLIC_REPORT_URL=https://harp-andres.github.io/automation-test-reports-hub/$LATEST_DIR/" >> "$GITHUB_ENV"
+          echo "PUBLIC_REPORT_RUN_URL=https://harp-andres.github.io/automation-test-reports-hub/$RUN_DIR/" >> "$GITHUB_ENV"
 
           AUTH_URL="https://x-access-token:${REPORTS_REPO_PAT}@github.com/${REPORTS_REPO}.git"
 
