@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 env:
   JAVA_VERSION: '17'
@@ -251,6 +253,13 @@ jobs:
     needs: [ mobile-tests-local-android ]
     runs-on: ubuntu-latest
     if: always() && github.event_name == 'workflow_dispatch' && needs['mobile-tests-local-android'].result != 'skipped'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout code
@@ -307,59 +316,25 @@ jobs:
           path: allure-report/
           retention-days: 30
 
-      - name: Publish Allure Report to Surge.sh
+      - name: Configure GitHub Pages
         if: env.ALLURE_GENERATED == 'true'
-        continue-on-error: true
-        shell: bash
-        env:
-          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
-          SURGE_DOMAIN: ${{ secrets.SURGE_DOMAIN || vars.SURGE_DOMAIN }}
-        run: |
-          if [ -z "$SURGE_TOKEN" ] || [ -z "$SURGE_DOMAIN" ]; then
-            echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
-            echo "SURGE_SKIP_REASON=Faltan SURGE_TOKEN y/o SURGE_DOMAIN (secret o variable)." >> $GITHUB_ENV
-            echo "::warning::Surge no configurado (faltan SURGE_TOKEN o SURGE_DOMAIN)."
-            exit 0
-          fi
+        uses: actions/configure-pages@v5
 
-          DOMAIN="$(printf '%s' "$SURGE_DOMAIN" | sed -E 's#^https?://##; s#/$##')"
-          if [ -z "$DOMAIN" ]; then
-            echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
-            echo "SURGE_SKIP_REASON=SURGE_DOMAIN esta vacio o invalido tras normalizacion." >> $GITHUB_ENV
-            echo "::warning::SURGE_DOMAIN inválido tras normalización."
-            exit 0
-          fi
+      - name: Upload GitHub Pages Artifact
+        if: env.ALLURE_GENERATED == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: allure-report/
 
-          npm install -g surge
-          if ! surge ./allure-report "$DOMAIN" --token "$SURGE_TOKEN"; then
-            echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
-            echo "SURGE_SKIP_REASON=El comando surge fallo al publicar el reporte." >> $GITHUB_ENV
-            echo "::warning::Fallo publicación en Surge."
-            exit 0
-          fi
-
-          SURGE_URL="https://$DOMAIN"
-          HTTP_STATUS="$(curl -s -o /tmp/surge_page.html -w '%{http_code}' "$SURGE_URL" || true)"
-          PAGE_TITLE="$(grep -oPm1 '(?<=<title>).*?(?=</title>)' /tmp/surge_page.html || true)"
-
-          echo "SURGE_URL=$SURGE_URL" >> $GITHUB_ENV
-          echo "SURGE_HTTP_STATUS=${HTTP_STATUS:-N/A}" >> $GITHUB_ENV
-          echo "SURGE_PAGE_TITLE=${PAGE_TITLE:-N/A}" >> $GITHUB_ENV
-
-          if [ "$HTTP_STATUS" != "200" ] || echo "$PAGE_TITLE" | grep -qi "Unavailable"; then
-            echo "SURGE_PUBLISHED=false" >> $GITHUB_ENV
-            echo "SURGE_SKIP_REASON=Surge publico URL pero responde con estado/titulo no valido (status=$HTTP_STATUS, title=${PAGE_TITLE:-N/A})." >> $GITHUB_ENV
-            echo "::warning::URL de Surge accesible pero sin contenido Allure válido."
-            exit 0
-          fi
-
-          echo "SURGE_PUBLISHED=true" >> $GITHUB_ENV
-          echo "SURGE_SKIP_REASON=" >> $GITHUB_ENV
-          echo "✅ Reporte publicado en $SURGE_URL"
+      - name: Deploy to GitHub Pages
+        if: env.ALLURE_GENERATED == 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4
 
       - name: Parse Results and Build Job Summary
         run: |
           RUN_ARTIFACTS_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+          PAGES_URL="${{ steps.deployment.outputs.page_url }}"
           echo "## 📊 Mobile Test Report - Self Hosted" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
@@ -410,20 +385,15 @@ jobs:
           echo "- 🔗 **[Abrir sección Artifacts de esta ejecución](${RUN_ARTIFACTS_URL})**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "${SURGE_PUBLISHED:-false}" = "true" ]; then
-            echo "### 🌐 Reporte online (gratis)" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$PAGES_URL" ]; then
+            echo "### 🌐 Reporte online (GitHub Pages)" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "👉 **[Abrir reporte Allure en Surge](${SURGE_URL})**" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Check | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| HTTP Status | ${SURGE_HTTP_STATUS:-N/A} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Page Title | ${SURGE_PAGE_TITLE:-N/A} |" >> $GITHUB_STEP_SUMMARY
+            echo "👉 **[Abrir reporte Allure en GitHub Pages](${PAGES_URL})**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "> El reporte se reemplaza con cada nueva ejecución manual del pipeline self-hosted." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           else
-            echo "> ℹ️ URL online no disponible: ${SURGE_SKIP_REASON:-no se publicó a Surge en esta ejecución}." >> $GITHUB_STEP_SUMMARY
+            echo "> ℹ️ URL online no disponible: no se pudo desplegar en GitHub Pages en esta ejecución." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
@@ -433,12 +403,6 @@ jobs:
             echo "### ⚠️ Warnings de reporte" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "- ${ALLURE_SKIP_REASON}" >> $GITHUB_STEP_SUMMARY
-            [ -n "${SURGE_SKIP_REASON:-}" ] && echo "- ${SURGE_SKIP_REASON}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          elif [ -n "${SURGE_SKIP_REASON:-}" ]; then
-            echo "### ⚠️ Warnings de reporte" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "- ${SURGE_SKIP_REASON}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
