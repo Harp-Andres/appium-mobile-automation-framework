@@ -394,6 +394,12 @@ jobs:
             echo '    .btn-primary { background: #238636; color: #fff; border: 1px solid #2ea043; }'
             echo '    .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }'
             echo '    .btn:hover { opacity: 0.85; }'
+            echo '    .runs-history { margin-top: 12px; }'
+            echo '    .runs-history summary { cursor: pointer; color: #58a6ff; font-size: 13px; font-weight: 600; user-select: none; padding: 4px 0; }'
+            echo '    .runs-history summary:hover { color: #79c0ff; }'
+            echo '    .runs-list { list-style: none; padding: 8px 0 0 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }'
+            echo '    .runs-list li a { display: inline-block; padding: 4px 10px; background: #21262d; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; text-decoration: none; font-size: 13px; }'
+            echo '    .runs-list li a:hover { background: #30363d; color: #58a6ff; border-color: #58a6ff; }'
             echo '    footer { margin-top: 40px; color: #484f58; font-size: 12px; }'
             echo '  </style>'
             echo '</head>'
@@ -405,8 +411,8 @@ jobs:
             for proj_dir in */; do
               proj_dir="${proj_dir%/}"
               [ -f "$proj_dir/latest/index.html" ] || continue
-              latest_url="https://harp-andres.github.io/automation-test-reports-hub/$proj_dir/latest/"
-              runs_count=$(find "$proj_dir/runs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+              BASE_URL="https://harp-andres.github.io/automation-test-reports-hub"
+              latest_url="$BASE_URL/$proj_dir/latest/"
               meta_file="$proj_dir/latest/_meta.txt"
               pub_date=""
               src_repo=""
@@ -416,6 +422,10 @@ jobs:
                 src_repo=$(grep 'source_repo=' "$meta_file" | cut -d= -f2)
                 run_num=$(grep 'run_number=' "$meta_file" | cut -d= -f2)
               fi
+              # Obtener runs ordenados de mayor a menor (más reciente primero)
+              mapfile -t sorted_runs < <(find "$proj_dir/runs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null \
+                | awk -F/ '{print $NF, $0}' | sort -rn | awk '{print $2}')
+              runs_count="${#sorted_runs[@]}"
               echo "  <div class=\"project\">"
               echo "    <h2>📦 $proj_dir</h2>"
               [ -n "$src_repo" ] && echo "    <p>🔗 Repositorio: <code>$src_repo</code></p>"
@@ -423,6 +433,18 @@ jobs:
               [ -n "$pub_date" ] && echo "    <p>📅 Publicado: $pub_date</p>"
               echo "    <p>📂 Histórico disponible: $runs_count run(s)</p>"
               echo "    <a class=\"btn btn-primary\" href=\"$latest_url\">🌐 Ver reporte latest</a>"
+              if [ "$runs_count" -gt 0 ]; then
+                echo "    <details class=\"runs-history\">"
+                echo "      <summary>📋 Ver runs históricos ($runs_count)</summary>"
+                echo "      <ul class=\"runs-list\">"
+                for run_dir in "${sorted_runs[@]}"; do
+                  rn=$(basename "$run_dir")
+                  run_url="$BASE_URL/$proj_dir/runs/$rn/"
+                  echo "        <li><a href=\"$run_url\" title=\"Abrir reporte run #$rn\">Run #$rn</a></li>"
+                done
+                echo "      </ul>"
+                echo "    </details>"
+              fi
               echo "  </div>"
             done
 
