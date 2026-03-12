@@ -23,17 +23,36 @@ public final class DriverFactory {
     public static AppiumDriver createDriver() {
         FrameworkConfig config = FrameworkConfig.getInstance();
         String platformName = config.get("platform.name").toLowerCase();
-        URL serverUrl = buildServerUrl(config.get("appium.server.url"));
+        String serverUrlRaw = config.get("appium.server.url");
+        URL serverUrl = buildServerUrl(serverUrlRaw);
+        boolean isBrowserStack = isBrowserStack(config);
         long startTime = System.currentTimeMillis();
 
         logInfo("createDriver start env=" + config.getActiveEnv() + " platform=" + platformName
-            + " serverUrl=" + sanitizeUrl(serverUrl));
+            + " serverUrl=" + sanitizeUrl(serverUrl) + " isBrowserStack=" + isBrowserStack);
+
+        // Verificar credenciales de BrowserStack si aplica
+        if (isBrowserStack && (serverUrlRaw.contains("hub.browserstack.com"))) {
+            String userInfo = serverUrl.getUserInfo();
+            if (userInfo == null || userInfo.isBlank()) {
+                logError("BrowserStack URL requiere credenciales (usuario:clave). Revisa appium.server.url");
+                throw new IllegalStateException("BrowserStack URL sin credenciales en: " + sanitizeUrl(serverUrl));
+            }
+        }
 
         AppiumDriver driver;
-        switch (platformName) {
-            case "android" -> driver = new AndroidDriver(serverUrl, buildAndroidOptions(config));
-            case "ios" -> driver = new IOSDriver(serverUrl, buildIosOptions(config));
-            default -> throw new IllegalArgumentException("platform.name no soportado: " + platformName);
+        try {
+            switch (platformName) {
+                case "android" -> driver = new AndroidDriver(serverUrl, buildAndroidOptions(config));
+                case "ios" -> driver = new IOSDriver(serverUrl, buildIosOptions(config));
+                default -> throw new IllegalArgumentException("platform.name no soportado: " + platformName);
+            }
+        } catch (Exception e) {
+            logError("Error al crear driver: " + e.getMessage());
+            if (isBrowserStack) {
+                logError("BrowserStack - Verifica: app (bs://ID), appium.server.url con credenciales, device.name, platform.version");
+            }
+            throw e;
         }
 
         String timeout = config.getOrDefault("new.command.timeout", "120");
@@ -60,23 +79,25 @@ public final class DriverFactory {
         String appPath = config.getOrDefault("app.path", "");
         if (!remoteApp.isBlank()) {
             options.setApp(remoteApp);
-            logInfo("Android options appStrategy=appCapability app=" + remoteApp);
+            logInfo("Android appStrategy=appCapability (BrowserStack remote) app=" + remoteApp);
         } else if (!appPath.isBlank()) {
             Path path = Path.of(appPath);
             if (!Files.exists(path)) {
                 throw new IllegalStateException("No existe app.path: " + path.toAbsolutePath());
             }
             options.setApp(path.toAbsolutePath().toString());
-            logInfo("Android options appStrategy=appPath appPath=" + path.toAbsolutePath());
+            logInfo("Android appStrategy=appPath appPath=" + path.toAbsolutePath());
         } else {
             String appPackage = config.getOrDefault("app.package", "");
             String appActivity = config.getOrDefault("app.activity", "");
             if (appPackage.isBlank() || appActivity.isBlank()) {
-                throw new IllegalStateException("Debes definir app.path o app.package + app.activity para Android");
+                String error = "Debes definir: app (bs://ID para BrowserStack) o app.path o app.package + app.activity para Android";
+                logError(error);
+                throw new IllegalStateException(error);
             }
             options.setAppPackage(appPackage);
             options.setAppActivity(appActivity);
-            logInfo("Android options appStrategy=packageActivity appPackage=" + appPackage + " appActivity=" + appActivity);
+            logInfo("Android appStrategy=packageActivity appPackage=" + appPackage + " appActivity=" + appActivity);
         }
 
         logInfo("Android options deviceName=" + options.getDeviceName() + " platformVersion="
