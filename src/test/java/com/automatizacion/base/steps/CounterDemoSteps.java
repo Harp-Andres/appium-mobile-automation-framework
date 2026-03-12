@@ -38,15 +38,6 @@ public class CounterDemoSteps {
     }
 
     /**
-     * El usuario incrementa el contador
-     */
-    @When("the user increments the counter")
-    public void incrementCounter() {
-        ensureCounterActions();
-        counterActions.incrementCounterTimes(1);
-    }
-
-    /**
      * Incrementar el contador N veces desde Cucumber
      */
     @When("the user increments the counter {int} times")

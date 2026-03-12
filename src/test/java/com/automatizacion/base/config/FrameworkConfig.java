@@ -39,7 +39,7 @@ public final class FrameworkConfig {
     }
 
     public String get(String key) {
-        String value = properties.getProperty(key);
+        String value = resolveValue(key);
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("No se encontro la propiedad obligatoria: " + key);
         }
@@ -47,7 +47,8 @@ public final class FrameworkConfig {
     }
 
     public String getOrDefault(String key, String defaultValue) {
-        return properties.getProperty(key, defaultValue).trim();
+        String value = resolveValue(key);
+        return value == null || value.isBlank() ? defaultValue.trim() : value.trim();
     }
 
     private Properties load(String env) {
@@ -79,11 +80,30 @@ public final class FrameworkConfig {
         };
 
         for (String key : required) {
-            String value = loaded.getProperty(key);
+            String value = resolveValue(key, loaded);
             if (value == null || value.isBlank()) {
                 throw new IllegalStateException("Falta propiedad obligatoria: " + key);
             }
         }
+    }
+
+    private String resolveValue(String key) {
+        return resolveValue(key, properties);
+    }
+
+    private String resolveValue(String key, Properties sourceProperties) {
+        String systemValue = System.getProperty(key);
+        if (systemValue != null && !systemValue.isBlank()) {
+            return systemValue;
+        }
+
+        String envKey = key.toUpperCase().replace('.', '_').replace('-', '_');
+        String envValue = System.getenv(envKey);
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue;
+        }
+
+        return sourceProperties.getProperty(key);
     }
 }
 

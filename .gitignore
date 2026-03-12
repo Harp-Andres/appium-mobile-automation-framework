@@ -64,3 +64,9 @@ env/
 node_modules/
 package-lock.json
 
+# Mobile app binaries (local only)
+mobile-apps/
+*.apk
+*.aab
+*.apks
+*.xapk

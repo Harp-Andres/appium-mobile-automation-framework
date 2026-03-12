@@ -1,27 +1,33 @@
 name: 🌐📱 Mobile Tests - BrowserStack
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       platform:
-        description: Platform to run in BrowserStack
+        description: Plataforma(s) a ejecutar en BrowserStack
         required: true
-        default: android
+        default: both
         type: choice
         options:
           - android
           - ios
+          - both
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: browserstack-${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: false
 
 env:
   JAVA_VERSION: '17'
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  BROWSERSTACK_HUB_HOST: hub.browserstack.com
 
 jobs:
   # ============================================================
@@ -45,13 +51,14 @@ jobs:
           cache: maven
 
       - name: Run Sanity Tests (no device required)
-        run: mvn test -Drun.mobile.tests=false -B
+        run: mvn test -Drun.mobile.tests=false -V -B
 
       - name: Upload Sanity Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sanity-test-results-browserstack
+          if-no-files-found: warn
           path: |
             target/allure-results/
             target/cucumber-reports/
@@ -62,11 +69,26 @@ jobs:
   # Mobile tests: solo corren con dispatch manual en BrowserStack
   # ============================================================
   mobile-tests-browserstack:
-    name: Mobile Tests - browserstack-${{ github.event.inputs.platform }}
+    name: Mobile Tests - browserstack-${{ matrix.platform }}
     needs: [ sanity-tests ]
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success'
+    if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success' && (github.event.inputs.platform == matrix.platform || github.event.inputs.platform == 'both')
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - platform: android
+            platform_name: Android
+            automation_name: UiAutomator2
+            default_device: Google Pixel 8
+            default_platform_version: '15.0'
+          - platform: ios
+            platform_name: iOS
+            automation_name: XCUITest
+            default_device: iPhone 16 Pro
+            default_platform_version: '18'
 
     steps:
       - name: Checkout code
@@ -79,34 +101,143 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Verify BrowserStack credentials
+      - name: Validate BrowserStack config and prepare runtime context
         shell: bash
         env:
           BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
           BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          BROWSERSTACK_ANDROID_APP_ID: ${{ secrets.BROWSERSTACK_ANDROID_APP_ID }}
+          BROWSERSTACK_IOS_APP_ID: ${{ secrets.BROWSERSTACK_IOS_APP_ID }}
+          BROWSERSTACK_ANDROID_APP_PACKAGE: ${{ vars.BROWSERSTACK_ANDROID_APP_PACKAGE }}
+          BROWSERSTACK_IOS_BUNDLE_ID: ${{ vars.BROWSERSTACK_IOS_BUNDLE_ID }}
+          BROWSERSTACK_PROJECT_NAME: ${{ vars.BROWSERSTACK_PROJECT_NAME }}
+          BROWSERSTACK_ANDROID_DEVICE: ${{ vars.BROWSERSTACK_ANDROID_DEVICE }}
+          BROWSERSTACK_ANDROID_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_ANDROID_PLATFORM_VERSION }}
+          BROWSERSTACK_IOS_DEVICE: ${{ vars.BROWSERSTACK_IOS_DEVICE }}
+          BROWSERSTACK_IOS_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_IOS_PLATFORM_VERSION }}
         run: |
+          set -euo pipefail
+          mkdir -p target/ci-logs
+
           if [ -z "$BROWSERSTACK_USERNAME" ] || [ -z "$BROWSERSTACK_ACCESS_KEY" ]; then
             echo "ERROR: BrowserStack credentials not found in repository secrets"
             exit 1
           fi
 
+          echo "::add-mask::$BROWSERSTACK_USERNAME"
+          echo "::add-mask::$BROWSERSTACK_ACCESS_KEY"
+
+          case "${{ matrix.platform }}" in
+            android)
+              APP_ID="$BROWSERSTACK_ANDROID_APP_ID"
+              APP_IDENTIFIER="$BROWSERSTACK_ANDROID_APP_PACKAGE"
+              IDENTIFIER_KEY="app.package"
+              DEVICE_NAME="${BROWSERSTACK_ANDROID_DEVICE:-${{ matrix.default_device }}}"
+              PLATFORM_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-${{ matrix.default_platform_version }}}"
+              ;;
+            ios)
+              APP_ID="$BROWSERSTACK_IOS_APP_ID"
+              APP_IDENTIFIER="$BROWSERSTACK_IOS_BUNDLE_ID"
+              IDENTIFIER_KEY="bundle.id"
+              DEVICE_NAME="${BROWSERSTACK_IOS_DEVICE:-${{ matrix.default_device }}}"
+              PLATFORM_VERSION="${BROWSERSTACK_IOS_PLATFORM_VERSION:-${{ matrix.default_platform_version }}}"
+              ;;
+            *)
+              echo "ERROR: Unsupported platform ${{ matrix.platform }}"
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$APP_ID" ]; then
+            echo "ERROR: Missing BrowserStack app id for platform=${{ matrix.platform }}"
+            echo "Hint: define secret BROWSERSTACK_$(echo '${{ matrix.platform }}' | tr '[:lower:]' '[:upper:]')_APP_ID"
+            exit 1
+          fi
+
+          if [ -z "$APP_IDENTIFIER" ]; then
+            echo "ERROR: Missing app identifier for platform=${{ matrix.platform }}"
+            echo "Hint: define repo variable $([ '${{ matrix.platform }}' = 'android' ] && echo 'BROWSERSTACK_ANDROID_APP_PACKAGE' || echo 'BROWSERSTACK_IOS_BUNDLE_ID')"
+            echo "The current smoke scenario validates foreground state, so this identifier is required."
+            exit 1
+          fi
+
+          PROJECT_NAME="${BROWSERSTACK_PROJECT_NAME:-appium-mobile-automation-framework}"
+          BUILD_NAME="${PROJECT_NAME} | run-${{ github.run_number }} | attempt-${{ github.run_attempt }}"
+          SESSION_NAME="${{ matrix.platform }} | job-${{ github.job }} | sha-${GITHUB_SHA::7}"
+          SERVER_URL="https://${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}@${BROWSERSTACK_HUB_HOST}/wd/hub"
+          SANITIZED_SERVER_URL="https://***:***@${BROWSERSTACK_HUB_HOST}/wd/hub"
+
+          {
+            echo "platform=${{ matrix.platform }}"
+            echo "platform_name=${{ matrix.platform_name }}"
+            echo "automation_name=${{ matrix.automation_name }}"
+            echo "device_name=${DEVICE_NAME}"
+            echo "platform_version=${PLATFORM_VERSION}"
+            echo "identifier_key=${IDENTIFIER_KEY}"
+            echo "project_name=${PROJECT_NAME}"
+            echo "build_name=${BUILD_NAME}"
+            echo "session_name=${SESSION_NAME}"
+            echo "server_url=${SANITIZED_SERVER_URL}"
+          } | tee target/ci-logs/browserstack-context.txt
+
+          curl -fsSL "https://${BROWSERSTACK_HUB_HOST}/wd/hub/status" > target/ci-logs/browserstack-status.json || echo '{}' > target/ci-logs/browserstack-status.json
+
+          {
+            echo "BROWSERSTACK_SERVER_URL=${SERVER_URL}"
+            echo "BROWSERSTACK_APP_ID=${APP_ID}"
+            echo "BROWSERSTACK_APP_IDENTIFIER=${APP_IDENTIFIER}"
+            echo "BROWSERSTACK_IDENTIFIER_KEY=${IDENTIFIER_KEY}"
+            echo "BROWSERSTACK_DEVICE_NAME=${DEVICE_NAME}"
+            echo "BROWSERSTACK_PLATFORM_VERSION=${PLATFORM_VERSION}"
+            echo "BROWSERSTACK_PROJECT_NAME=${PROJECT_NAME}"
+            echo "BROWSERSTACK_BUILD_NAME=${BUILD_NAME}"
+            echo "BROWSERSTACK_SESSION_NAME=${SESSION_NAME}"
+          } >> "$GITHUB_ENV"
+
       - name: Run Mobile Tests - BrowserStack
         shell: bash
-        env:
-          TEST_PLATFORM: ${{ github.event.inputs.platform }}
-          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
-          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
-        run: mvn test -Drun.mobile.tests=true -Denv=browserstack -Dplatform=${TEST_PLATFORM} -Devidence.video.enabled=false -B
+        run: |
+          set -o pipefail
+          mkdir -p target/ci-logs
+
+          MVN_ARGS=(
+            test
+            "-Drun.mobile.tests=true"
+            "-Denv=browserstack"
+            "-Dplatform.name=${{ matrix.platform_name }}"
+            "-Dplatform.version=${BROWSERSTACK_PLATFORM_VERSION}"
+            "-Ddevice.name=${BROWSERSTACK_DEVICE_NAME}"
+            "-Dautomation.name=${{ matrix.automation_name }}"
+            "-Dappium.server.url=${BROWSERSTACK_SERVER_URL}"
+            "-Dapp=${BROWSERSTACK_APP_ID}"
+            "-D${BROWSERSTACK_IDENTIFIER_KEY}=${BROWSERSTACK_APP_IDENTIFIER}"
+            "-Dbrowserstack.project.name=${BROWSERSTACK_PROJECT_NAME}"
+            "-Dbrowserstack.build.name=${BROWSERSTACK_BUILD_NAME}"
+            "-Dbrowserstack.session.name=${BROWSERSTACK_SESSION_NAME}"
+            "-Devidence.video.enabled=false"
+          )
+
+          printf '%s\n' "${MVN_ARGS[@]}" > target/ci-logs/maven-command-${{ matrix.platform }}.txt
+          mvn -V -e -B "${MVN_ARGS[@]}" 2>&1 | tee target/ci-logs/mobile-maven-${{ matrix.platform }}.log
+
+      - name: Print Maven log tail on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== LAST 200 LINES OF target/ci-logs/mobile-maven-${{ matrix.platform }}.log ====="
+          tail -n 200 target/ci-logs/mobile-maven-${{ matrix.platform }}.log || true
 
       - name: Upload BrowserStack Test Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mobile-test-results-browserstack-${{ github.event.inputs.platform }}
+          name: mobile-test-results-browserstack-${{ matrix.platform }}
+          if-no-files-found: warn
           path: |
             target/allure-results/
             target/cucumber-reports/
             target/surefire-reports/
+            target/ci-logs/
             target/videos/
             target/screenshots/
           retention-days: 30
@@ -122,7 +253,10 @@ jobs:
             echo "|--------|-------|"
             echo "| 🏃 Run | #${{ github.run_number }} |"
             echo "| 📅 Date | $(date '+%Y-%m-%d %H:%M UTC') |"
-            echo "| 📱 Platform | ${{ github.event.inputs.platform }} |"
+            echo "| 📱 Platform | ${{ matrix.platform_name }} |"
+            echo "| 📟 Device | ${BROWSERSTACK_DEVICE_NAME:-n/a} |"
+            echo "| 🧪 Build name | ${BROWSERSTACK_BUILD_NAME:-n/a} |"
+            echo "| 🆔 Session name | ${BROWSERSTACK_SESSION_NAME:-n/a} |"
             echo "| 👤 Triggered by | ${{ github.actor }} |"
             echo ""
             echo "### 🌐 Ver reporte oficial"
@@ -133,8 +267,13 @@ jobs:
             echo ""
             echo "> Inicia sesión con tu cuenta de BrowserStack para ver la sesión de esta ejecución."
             echo ""
+            echo "### 🧾 Logs estrategicos incluidos"
+            echo "- browserstack-context.txt"
+            echo "- browserstack-status.json"
+            echo "- mobile-maven-${{ matrix.platform }}.log"
+            echo ""
             echo "### 📁 Artifact de respaldo"
-            echo "- 📦 **mobile-test-results-browserstack-${{ github.event.inputs.platform }}**: allure-results, cucumber y surefire (descargable desde Artifacts de esta ejecución)"
+            echo "- 📦 **mobile-test-results-browserstack-${{ matrix.platform }}**: allure-results, cucumber, surefire, screenshots y ci-logs"
           } >> "$GITHUB_STEP_SUMMARY"
 
 

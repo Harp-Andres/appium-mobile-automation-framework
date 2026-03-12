@@ -110,6 +110,7 @@
                 <configuration>
                     <includes>
                         <include>**/RunCucumberTest.java</include>
+                        <include>**/*UnitTest.java</include>
                     </includes>
                 </configuration>
             </plugin>
