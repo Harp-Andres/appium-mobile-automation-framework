@@ -51,8 +51,8 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Run Sanity Tests (no device required)
-        run: mvn test -Drun.mobile.tests=false -V -B
+      - name: 🧪 Run Sanity Tests - Unit Tests + Cucumber Health (sin dispositivo)
+        run: mvn test "-Drun.mobile.tests=false" -B
 
       - name: Upload Sanity Test Results
         if: always()
@@ -70,7 +70,7 @@ jobs:
   # Mobile tests: solo corren con dispatch manual en BrowserStack
   # ============================================================
   mobile-tests-browserstack:
-    name: Mobile Tests - browserstack-${{ matrix.platform }}
+    name: "📱 Mobile Tests - BrowserStack (${{ matrix.platform_name }})"
     needs: [ sanity-tests ]
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -265,7 +265,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## 📊 Mobile Test Report - BrowserStack"
+            echo "## 📱 Mobile Tests - BrowserStack (${{ matrix.platform_name }}) | Run #${{ github.run_number }}"
             echo ""
             echo "| Detail | Value |"
             echo "|--------|-------|"
@@ -277,21 +277,216 @@ jobs:
             echo "| 🆔 Session name | ${BROWSERSTACK_SESSION_NAME:-n/a} |"
             echo "| 👤 Triggered by | ${{ github.actor }} |"
             echo ""
-            echo "### 🌐 Ver reporte oficial"
+            echo "### 🌐 BrowserStack App Automate Dashboard"
             echo ""
-            echo "Los resultados completos (videos, logs, screenshots por dispositivo) están disponibles en el dashboard oficial:"
+            echo "👉 **[Ver sesión en BrowserStack](https://app-automate.browserstack.com/dashboard)**"
+            echo "> Videos, logs y screenshots del dispositivo disponibles en el dashboard oficial."
             echo ""
-            echo "👉 **[BrowserStack App Automate Dashboard](https://app-automate.browserstack.com/dashboard)**"
-            echo ""
-            echo "> Inicia sesión con tu cuenta de BrowserStack para ver la sesión de esta ejecución."
-            echo ""
-            echo "### 🧾 Logs estrategicos incluidos"
-            echo "- browserstack-context.txt"
-            echo "- browserstack-status.json"
-            echo "- mobile-maven-${{ matrix.platform }}.log"
-            echo ""
-            echo "### 📁 Artifact de respaldo"
-            echo "- 📦 **mobile-test-results-browserstack-${{ matrix.platform }}**: allure-results, cucumber, surefire, screenshots y ci-logs"
+            echo "### 📦 Artifact de esta plataforma"
+            echo "- **mobile-test-results-browserstack-${{ matrix.platform }}**: allure-results, cucumber, surefire, ci-logs"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
+  # Publish Allure + Cucumber Report (BrowserStack)
+  # ============================================================
+  publish-report-browserstack:
+    name: 📊 Generate & Publish Report - BrowserStack
+    needs: [ mobile-tests-browserstack ]
+    runs-on: ubuntu-latest
+    if: always() && github.event_name == 'workflow_dispatch' && needs['mobile-tests-browserstack'].result != 'skipped'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download BrowserStack Results (Android)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: mobile-test-results-browserstack-android
+          path: downloaded-results
+
+      - name: Download BrowserStack Results (iOS)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: mobile-test-results-browserstack-ios
+          path: downloaded-results-ios
+
+      - name: Install Allure CLI
+        continue-on-error: true
+        run: |
+          if wget -qO allure.tgz https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.tgz \
+             && tar -xzf allure.tgz \
+             && sudo mv allure-2.29.0 /opt/allure \
+             && sudo ln -sf /opt/allure/bin/allure /usr/local/bin/allure; then
+            echo "ALLURE_CLI_READY=true" >> $GITHUB_ENV
+            allure --version || true
+          else
+            echo "ALLURE_CLI_READY=false" >> $GITHUB_ENV
+            echo "::warning::No se pudo instalar Allure CLI."
+          fi
+
+      - name: Generate Allure HTML Report
+        continue-on-error: true
+        run: |
+          RESULTS_DIR="downloaded-results/allure-results"
+          if [ "${ALLURE_CLI_READY:-false}" != "true" ]; then
+            echo "ALLURE_GENERATED=false" >> $GITHUB_ENV
+            echo "ALLURE_SKIP_REASON=No se pudo instalar Allure CLI." >> $GITHUB_ENV
+            exit 0
+          fi
+          if [ -d "$RESULTS_DIR" ] && allure generate "$RESULTS_DIR" --clean -o allure-report; then
+            echo "ALLURE_GENERATED=true" >> $GITHUB_ENV
+            echo "ALLURE_SKIP_REASON=" >> $GITHUB_ENV
+            echo "✅ Allure report generated"
+          else
+            echo "ALLURE_GENERATED=false" >> $GITHUB_ENV
+            echo "ALLURE_SKIP_REASON=No existe allure-results o falló la generación." >> $GITHUB_ENV
+            echo "::warning::No se pudo generar Allure HTML."
+          fi
+
+      - name: Upload Allure HTML Report as Artifact
+        if: env.ALLURE_GENERATED == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-html-report-browserstack-run-${{ github.run_number }}
+          path: allure-report/
+          retention-days: 30
+
+      - name: Publish Allure Report to public reports hub
+        if: env.ALLURE_GENERATED == 'true'
+        env:
+          REPORTS_REPO_PAT: ${{ secrets.REPORTS_REPO_PAT }}
+          REPORTS_REPO: Harp-Andres/automation-test-reports-hub
+        run: |
+          set -e
+          if [ -z "${REPORTS_REPO_PAT:-}" ]; then
+            echo "REPORTS_PUBLISHED=false" >> "$GITHUB_ENV"
+            echo "REPORTS_SKIP_REASON=Falta el secret REPORTS_REPO_PAT." >> "$GITHUB_ENV"
+            echo "::warning::No se publicó online: falta REPORTS_REPO_PAT."
+            exit 0
+          fi
+
+          PROJECT_ID="appium-mobile-automation-framework-browserstack"
+          RUN_DIR="$PROJECT_ID/runs/${{ github.run_number }}"
+          LATEST_DIR="$PROJECT_ID/latest"
+
+          echo "REPORT_PROJECT_ID=$PROJECT_ID" >> "$GITHUB_ENV"
+          echo "PUBLIC_REPORT_URL=https://harp-andres.github.io/automation-test-reports-hub/$LATEST_DIR/" >> "$GITHUB_ENV"
+          echo "PUBLIC_REPORT_RUN_URL=https://harp-andres.github.io/automation-test-reports-hub/$RUN_DIR/" >> "$GITHUB_ENV"
+
+          AUTH_URL="https://x-access-token:${REPORTS_REPO_PAT}@github.com/${REPORTS_REPO}.git"
+          mkdir -p reports-repo
+          cd reports-repo
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "$AUTH_URL"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages
+            git checkout -B gh-pages origin/gh-pages
+          else
+            git checkout --orphan gh-pages
+          fi
+
+          mkdir -p "$RUN_DIR" "$LATEST_DIR"
+          rm -rf "${RUN_DIR:?}"/* "${LATEST_DIR:?}"/*
+          cp -R ../allure-report/. "$RUN_DIR/"
+          cp -R ../allure-report/. "$LATEST_DIR/"
+
+          printf 'source_repo=%s\nrun_id=%s\nrun_number=%s\npublished_at_utc=%s\n' \
+            "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_NUMBER}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUN_DIR/_meta.txt"
+          cp "$RUN_DIR/_meta.txt" "$LATEST_DIR/_meta.txt"
+
+          git add "$PROJECT_ID"
+          if git diff --cached --quiet; then
+            echo "REPORTS_PUBLISHED=true" >> "$GITHUB_ENV"
+            echo "REPORTS_SKIP_REASON=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          git commit -m "report(browserstack): $PROJECT_ID run ${{ github.run_number }}"
+          git push origin gh-pages
+          echo "REPORTS_PUBLISHED=true" >> "$GITHUB_ENV"
+          echo "REPORTS_SKIP_REASON=" >> "$GITHUB_ENV"
+          echo "✅ Reporte publicado en hub público"
+
+      - name: 📊 Build Job Summary - BrowserStack Full Report
+        if: always()
+        run: |
+          RUN_ARTIFACTS_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+          PUBLIC_REPORT_URL="${PUBLIC_REPORT_URL:-}"
+          REPORTS_PUBLISHED="${REPORTS_PUBLISHED:-false}"
+
+          echo "## 📊 BrowserStack Test Report - Run #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ Detalle | 💾 Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏃 Run | **#${{ github.run_number }}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📅 Fecha | $(date '+%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌿 Rama | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 👤 Disparado por | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ☁️ Cloud | BrowserStack App Automate |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Cucumber JSON
+          CUCUMBER_JSON="downloaded-results/cucumber-reports/cucumber.json"
+          if [ -f "$CUCUMBER_JSON" ]; then
+            SCENARIOS=$(python3 -c "import json; d=json.load(open('$CUCUMBER_JSON')); print(sum(len(f.get('elements',[])) for f in d))" 2>/dev/null || echo "N/A")
+            PASSED_SC=$(python3 -c "import json; d=json.load(open('$CUCUMBER_JSON')); print(sum(1 for f in d for e in f.get('elements',[]) if all(s.get('result',{}).get('status')=='passed' for s in e.get('steps',[]))))" 2>/dev/null || echo "N/A")
+            echo "### 🥒 Escenarios Cucumber" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Escenarios | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+            echo "|------------------|-----------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **$SCENARIOS** | **$PASSED_SC** |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Surefire XML
+          SUREFIRE_DIR="downloaded-results/surefire-reports"
+          if ls "$SUREFIRE_DIR"/*.xml 1>/dev/null 2>&1; then
+            TOTAL=$(grep -h 'tests=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'tests="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            FAILURES=$(grep -h 'failures=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'failures="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            ERRORS=$(grep -h 'errors=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'errors="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            SKIPPED=$(grep -h 'skipped=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'skipped="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            TOTAL=${TOTAL:-0}; FAILURES=${FAILURES:-0}; ERRORS=${ERRORS:-0}; SKIPPED=${SKIPPED:-0}
+            PASSED=$((TOTAL - FAILURES - ERRORS - SKIPPED))
+            if [ "$FAILURES" -eq 0 ] && [ "$ERRORS" -eq 0 ]; then STATUS="✅ PASSED"; else STATUS="❌ FAILED"; fi
+            echo "### 🧪 Resultados Surefire" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Estado | Total | ✅ Passed | ❌ Failed | ⚠️ Errors | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|-----------|-----------|-----------|------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| $STATUS | **$TOTAL** | **$PASSED** | **$FAILURES** | **$ERRORS** | **$SKIPPED** |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### 📁 Artefactos" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **allure-html-report-browserstack-run-${{ github.run_number }}**: Reporte Allure HTML" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **mobile-test-results-browserstack-android**: Resultados Android" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **mobile-test-results-browserstack-ios**: Resultados iOS (si aplica)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[🔗 Abrir sección Artifacts →]($RUN_ARTIFACTS_URL)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$REPORTS_PUBLISHED" = "true" ] && [ -n "$PUBLIC_REPORT_URL" ]; then
+            echo "### 🌐 Reporte Online (Public Hub)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**👉 [Ver reporte Allure latest →]($PUBLIC_REPORT_URL)**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "[📚 Ver todos los históricos →](https://harp-andres.github.io/automation-test-reports-hub/)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### 🌐 BrowserStack Dashboard" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**👉 [Ver sesiones en BrowserStack App Automate](https://app-automate.browserstack.com/dashboard)**" >> $GITHUB_STEP_SUMMARY
+          echo "> Videos, logs y screenshots por dispositivo disponibles en el dashboard oficial." >> $GITHUB_STEP_SUMMARY
+
 
 

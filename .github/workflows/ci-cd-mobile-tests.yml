@@ -45,8 +45,8 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Run Sanity Tests (no device required)
-        run: mvn test -Drun.mobile.tests=false -B
+      - name: 🧪 Run Sanity Tests - Unit Tests + Cucumber Health (sin dispositivo)
+        run: mvn test "-Drun.mobile.tests=false" -B
 
       - name: Upload Sanity Test Results
         if: always()
