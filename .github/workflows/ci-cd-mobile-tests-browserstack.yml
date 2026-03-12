@@ -13,7 +13,8 @@ on:
           - ios
           - both
   push:
-    branches: [ main ]
+    branches:
+      - '**'
   pull_request:
     branches: [ main ]
 
