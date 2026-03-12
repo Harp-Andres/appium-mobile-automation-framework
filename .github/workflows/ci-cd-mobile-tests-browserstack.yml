@@ -73,7 +73,7 @@ jobs:
     needs: [ sanity-tests ]
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success' && (github.event.inputs.platform == matrix.platform || github.event.inputs.platform == 'both')
+    if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success'
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -91,10 +91,25 @@ jobs:
             default_platform_version: '18'
 
     steps:
+      - name: ✅ Check platform selection
+        id: platform-check
+        run: |
+          INPUT="${{ github.event.inputs.platform }}"
+          PLATFORM="${{ matrix.platform }}"
+          if [[ "$INPUT" == "$PLATFORM" || "$INPUT" == "both" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "▶️ Platform $PLATFORM selected - will run tests"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "⏭️ Platform $PLATFORM not selected (input=$INPUT) - skipping"
+          fi
+
       - name: Checkout code
+        if: steps.platform-check.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Java ${{ env.JAVA_VERSION }}
+        if: steps.platform-check.outputs.should_run == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
@@ -102,6 +117,7 @@ jobs:
           cache: maven
 
       - name: Validate BrowserStack config and prepare runtime context
+        if: steps.platform-check.outputs.should_run == 'true'
         shell: bash
         env:
           BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
@@ -195,6 +211,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Run Mobile Tests - BrowserStack
+        if: steps.platform-check.outputs.should_run == 'true'
         shell: bash
         run: |
           set -o pipefail
@@ -221,7 +238,7 @@ jobs:
           mvn -V -e -B "${MVN_ARGS[@]}" 2>&1 | tee target/ci-logs/mobile-maven-${{ matrix.platform }}.log
 
       - name: Print Maven log tail on failure
-        if: failure()
+        if: failure() && steps.platform-check.outputs.should_run == 'true'
         shell: bash
         run: |
           echo "===== LAST 200 LINES OF target/ci-logs/mobile-maven-${{ matrix.platform }}.log ====="
