@@ -75,8 +75,22 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/ci-logs
+          CONFIG_FILE="src/test/resources/config/browserstack.properties"
+
+          read_prop() {
+            local key="$1"
+            if [ -f "$CONFIG_FILE" ]; then
+              awk -F= -v target="$key" '$1==target {sub(/^[[:space:]]+/,"",$2); sub(/[[:space:]]+$/,"",$2); print $2; exit}' "$CONFIG_FILE"
+            fi
+          }
 
           echo "browserstack_auth_ok=false" >> "$GITHUB_OUTPUT"
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            INPUT_PLATFORM="${INPUT_PLATFORM:-both}"
+          else
+            INPUT_PLATFORM="push-auth-only"
+          fi
 
           if [ -z "${BROWSERSTACK_USERNAME:-}" ] || [ -z "${BROWSERSTACK_ACCESS_KEY:-}" ]; then
             echo "ERROR: faltan secrets BROWSERSTACK_USERNAME/BROWSERSTACK_ACCESS_KEY" | tee target/ci-logs/browserstack-sanity-check.txt
@@ -93,6 +107,8 @@ jobs:
           fi
 
           case "${INPUT_PLATFORM}" in
+            push-auth-only)
+              ;;
             android)
               [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
@@ -113,8 +129,12 @@ jobs:
               ;;
           esac
 
-          ANDROID_DEVICE="${BROWSERSTACK_ANDROID_DEVICE:-Google Pixel 8}"
-          ANDROID_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-14.0}"
+          DEFAULT_ANDROID_DEVICE="$(read_prop 'device.name')"
+          DEFAULT_ANDROID_VERSION="$(read_prop 'platform.version')"
+          DEFAULT_PROJECT_NAME="$(read_prop 'browserstack.project.name')"
+
+          ANDROID_DEVICE="${BROWSERSTACK_ANDROID_DEVICE:-${DEFAULT_ANDROID_DEVICE:-Google Pixel 8}}"
+          ANDROID_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-${DEFAULT_ANDROID_VERSION:-14.0}}"
           IOS_DEVICE="${BROWSERSTACK_IOS_DEVICE:-iPhone 16 Pro}"
           IOS_VERSION="${BROWSERSTACK_IOS_PLATFORM_VERSION:-18}"
 
@@ -122,6 +142,7 @@ jobs:
             echo "status=ok"
             echo "platform=${INPUT_PLATFORM}"
             echo "auth_http_code=${http_code}"
+            echo "project_name=${DEFAULT_PROJECT_NAME:-appium-mobile-automation-framework}"
             echo "android_device=${ANDROID_DEVICE}"
             echo "android_platform_version=${ANDROID_VERSION}"
             echo "ios_device=${IOS_DEVICE}"
@@ -164,7 +185,7 @@ jobs:
             echo "" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "### 🔐 BrowserStack check" >> "$GITHUB_STEP_SUMMARY"
-            echo "- No ejecutado (evento distinto a workflow_dispatch)." >> "$GITHUB_STEP_SUMMARY"
+            echo "- No ejecutado." >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -252,6 +273,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/ci-logs
+          CONFIG_FILE="src/test/resources/config/browserstack.properties"
+
+          read_prop() {
+            local key="$1"
+            if [ -f "$CONFIG_FILE" ]; then
+              awk -F= -v target="$key" '$1==target {sub(/^[[:space:]]+/,"",$2); sub(/[[:space:]]+$/,"",$2); print $2; exit}' "$CONFIG_FILE"
+            fi
+          }
 
           if [ -z "$BROWSERSTACK_USERNAME" ] || [ -z "$BROWSERSTACK_ACCESS_KEY" ]; then
             echo "ERROR: BrowserStack credentials not found in repository secrets"
@@ -266,8 +295,10 @@ jobs:
               APP_ID="$BROWSERSTACK_ANDROID_APP_ID"
               APP_IDENTIFIER="$BROWSERSTACK_ANDROID_APP_PACKAGE"
               IDENTIFIER_KEY="app.package"
-              DEVICE_NAME="${BROWSERSTACK_ANDROID_DEVICE:-${{ matrix.default_device }}}"
-              PLATFORM_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-${{ matrix.default_platform_version }}}"
+              DEFAULT_DEVICE="$(read_prop 'device.name')"
+              DEFAULT_PLATFORM_VERSION="$(read_prop 'platform.version')"
+              DEVICE_NAME="${BROWSERSTACK_ANDROID_DEVICE:-${DEFAULT_DEVICE:-${{ matrix.default_device }}}}"
+              PLATFORM_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-${DEFAULT_PLATFORM_VERSION:-${{ matrix.default_platform_version }}}}"
               ;;
             ios)
               APP_ID="$BROWSERSTACK_IOS_APP_ID"
@@ -295,7 +326,8 @@ jobs:
             exit 1
           fi
 
-          PROJECT_NAME="${BROWSERSTACK_PROJECT_NAME:-appium-mobile-automation-framework}"
+          DEFAULT_PROJECT_NAME="$(read_prop 'browserstack.project.name')"
+          PROJECT_NAME="${BROWSERSTACK_PROJECT_NAME:-${DEFAULT_PROJECT_NAME:-appium-mobile-automation-framework}}"
           BUILD_NAME="${PROJECT_NAME} | run-${{ github.run_number }} | attempt-${{ github.run_attempt }}"
           SESSION_NAME="${{ matrix.platform }} | job-${{ github.job }} | sha-${GITHUB_SHA::7}"
           SERVER_URL="https://${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}@${BROWSERSTACK_HUB_HOST}/wd/hub"
