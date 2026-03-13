@@ -56,9 +56,9 @@ jobs:
       - name: 🧪 Run Sanity Tests - Unit Tests + Cucumber Health (sin dispositivo)
         run: mvn test "-Drun.mobile.tests=false" -B
 
-      - name: 🔐 BrowserStack Auth Sanity (manual)
+      - name: 🔐 BrowserStack Auth Sanity Check
         id: browserstack_auth_sanity
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         shell: bash
         env:
           INPUT_PLATFORM: ${{ github.event.inputs.platform }}
