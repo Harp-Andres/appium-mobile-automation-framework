@@ -68,6 +68,10 @@ jobs:
           BROWSERSTACK_IOS_APP_ID: ${{ secrets.BROWSERSTACK_IOS_APP_ID }}
           BROWSERSTACK_ANDROID_APP_PACKAGE: ${{ vars.BROWSERSTACK_ANDROID_APP_PACKAGE }}
           BROWSERSTACK_IOS_BUNDLE_ID: ${{ vars.BROWSERSTACK_IOS_BUNDLE_ID }}
+          BROWSERSTACK_ANDROID_DEVICE: ${{ vars.BROWSERSTACK_ANDROID_DEVICE }}
+          BROWSERSTACK_ANDROID_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_ANDROID_PLATFORM_VERSION }}
+          BROWSERSTACK_IOS_DEVICE: ${{ vars.BROWSERSTACK_IOS_DEVICE }}
+          BROWSERSTACK_IOS_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_IOS_PLATFORM_VERSION }}
         run: |
           set -euo pipefail
           mkdir -p target/ci-logs
@@ -88,20 +92,68 @@ jobs:
             exit 1
           fi
 
+          ANDROID_DEVICE="${BROWSERSTACK_ANDROID_DEVICE:-Google Pixel 8}"
+          ANDROID_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-14.0}"
+          IOS_DEVICE="${BROWSERSTACK_IOS_DEVICE:-iPhone 16 Pro}"
+          IOS_VERSION="${BROWSERSTACK_IOS_PLATFORM_VERSION:-18}"
+
+          devices_json=$(mktemp)
+          curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" "https://api-cloud.browserstack.com/app-automate/devices.json" > "$devices_json"
+
+          validate_platform_support() {
+            local target_platform="$1"
+            local target_device="$2"
+            local target_version="$3"
+            python3 - "$devices_json" "$target_platform" "$target_device" "$target_version" <<'PY'
+import json, sys
+from pathlib import Path
+
+path, platform, device, version = sys.argv[1:5]
+data = json.loads(Path(path).read_text(encoding='utf-8'))
+
+def norm(v: str) -> str:
+    v = (v or '').strip().lower()
+    return v[:-2] if v.endswith('.0') else v
+
+matches = [
+    item for item in data
+    if str(item.get('os', '')).strip().lower() == platform.lower()
+    and str(item.get('device', '')).strip().lower() == device.lower()
+]
+
+if not matches:
+    print(f"ERROR: BrowserStack no soporta el dispositivo '{device}' para plataforma '{platform}'.")
+    sys.exit(2)
+
+supported = sorted({str(item.get('os_version', '')).strip() for item in matches if str(item.get('os_version', '')).strip()})
+supported_norm = {norm(v) for v in supported}
+
+if norm(version) not in supported_norm:
+    print(f"ERROR: combinación inválida {platform}/{device}/{version}. Versiones soportadas: {', '.join(supported)}")
+    sys.exit(3)
+
+print(f"OK: {platform}/{device}/{version}")
+PY
+          }
+
           case "${INPUT_PLATFORM}" in
             android)
               [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              validate_platform_support "android" "$ANDROID_DEVICE" "$ANDROID_VERSION" | tee -a target/ci-logs/browserstack-sanity-check.txt
               ;;
             ios)
               [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               [ -n "${BROWSERSTACK_IOS_BUNDLE_ID:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              validate_platform_support "ios" "$IOS_DEVICE" "$IOS_VERSION" | tee -a target/ci-logs/browserstack-sanity-check.txt
               ;;
             both)
               [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               [ -n "${BROWSERSTACK_IOS_BUNDLE_ID:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              validate_platform_support "android" "$ANDROID_DEVICE" "$ANDROID_VERSION" | tee -a target/ci-logs/browserstack-sanity-check.txt
+              validate_platform_support "ios" "$IOS_DEVICE" "$IOS_VERSION" | tee -a target/ci-logs/browserstack-sanity-check.txt
               ;;
             *)
               echo "ERROR: platform no soportada: ${INPUT_PLATFORM}" | tee target/ci-logs/browserstack-sanity-check.txt
@@ -114,7 +166,7 @@ jobs:
             echo "platform=${INPUT_PLATFORM}"
             echo "auth_http_code=${http_code}"
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } | tee target/ci-logs/browserstack-sanity-check.txt
+          } | tee -a target/ci-logs/browserstack-sanity-check.txt
 
           echo "browserstack_auth_ok=true" >> "$GITHUB_OUTPUT"
 
@@ -149,7 +201,7 @@ jobs:
             platform_name: Android
             automation_name: UiAutomator2
             default_device: Google Pixel 8
-            default_platform_version: '15.0'
+            default_platform_version: '14.0'
           - platform: ios
             platform_name: iOS
             automation_name: XCUITest
