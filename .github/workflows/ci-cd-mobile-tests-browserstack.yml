@@ -68,6 +68,7 @@ jobs:
           BROWSERSTACK_IOS_APP_ID: ${{ secrets.BROWSERSTACK_IOS_APP_ID }}
           BROWSERSTACK_ANDROID_APP_PACKAGE: ${{ vars.BROWSERSTACK_ANDROID_APP_PACKAGE }}
           BROWSERSTACK_IOS_BUNDLE_ID: ${{ vars.BROWSERSTACK_IOS_BUNDLE_ID }}
+          BROWSERSTACK_PROJECT_NAME: ${{ vars.BROWSERSTACK_PROJECT_NAME }}
           BROWSERSTACK_ANDROID_DEVICE: ${{ vars.BROWSERSTACK_ANDROID_DEVICE }}
           BROWSERSTACK_ANDROID_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_ANDROID_PLATFORM_VERSION }}
           BROWSERSTACK_IOS_DEVICE: ${{ vars.BROWSERSTACK_IOS_DEVICE }}
@@ -82,6 +83,26 @@ jobs:
             if [ -f "$CONFIG_FILE" ]; then
               awk -F= -v target="$key" '$1==target {sub(/^[[:space:]]+/,"",$2); sub(/[[:space:]]+$/,"",$2); print $2; exit}' "$CONFIG_FILE"
             fi
+          }
+
+          resolve_value() {
+            local github_value="${1:-}"
+            local config_key="$2"
+            local fallback="${3:-}"
+            local config_value=""
+
+            if [ -n "$github_value" ]; then
+              printf '%s' "$github_value"
+              return 0
+            fi
+
+            config_value="$(read_prop "$config_key")"
+            if [ -n "$config_value" ]; then
+              printf '%s' "$config_value"
+              return 0
+            fi
+
+            printf '%s' "$fallback"
           }
 
           echo "browserstack_auth_ok=false" >> "$GITHUB_OUTPUT"
@@ -106,22 +127,30 @@ jobs:
             exit 1
           fi
 
+          DEFAULT_ANDROID_DEVICE="$(resolve_value '' 'browserstack.android.device.name' "$(read_prop 'device.name')")"
+          DEFAULT_ANDROID_VERSION="$(resolve_value '' 'browserstack.android.platform.version' "$(read_prop 'platform.version')")"
+          DEFAULT_IOS_DEVICE="$(resolve_value '' 'browserstack.ios.device.name' 'iPhone 16 Pro')"
+          DEFAULT_IOS_VERSION="$(resolve_value '' 'browserstack.ios.platform.version' '18')"
+          PROJECT_NAME="$(resolve_value "${BROWSERSTACK_PROJECT_NAME:-}" 'browserstack.project.name' 'appium-mobile-automation-framework')"
+          ANDROID_APP_PACKAGE="$(resolve_value "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" 'app.package' '')"
+          IOS_BUNDLE_ID="$(resolve_value "${BROWSERSTACK_IOS_BUNDLE_ID:-}" 'bundle.id' '')"
+
           case "${INPUT_PLATFORM}" in
             push-auth-only)
               ;;
             android)
               [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "$ANDROID_APP_PACKAGE" ] || { echo "ERROR: falta app.package en config o variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               ;;
             ios)
               [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "${BROWSERSTACK_IOS_BUNDLE_ID:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "$IOS_BUNDLE_ID" ] || { echo "ERROR: falta bundle.id en config o variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               ;;
             both)
               [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "$ANDROID_APP_PACKAGE" ] || { echo "ERROR: falta app.package en config o variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "${BROWSERSTACK_IOS_BUNDLE_ID:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "$IOS_BUNDLE_ID" ] || { echo "ERROR: falta bundle.id en config o variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
               ;;
             *)
               echo "ERROR: platform no soportada: ${INPUT_PLATFORM}" | tee target/ci-logs/browserstack-sanity-check.txt
@@ -129,20 +158,16 @@ jobs:
               ;;
           esac
 
-          DEFAULT_ANDROID_DEVICE="$(read_prop 'device.name')"
-          DEFAULT_ANDROID_VERSION="$(read_prop 'platform.version')"
-          DEFAULT_PROJECT_NAME="$(read_prop 'browserstack.project.name')"
-
-          ANDROID_DEVICE="${BROWSERSTACK_ANDROID_DEVICE:-${DEFAULT_ANDROID_DEVICE:-Google Pixel 8}}"
-          ANDROID_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-${DEFAULT_ANDROID_VERSION:-14.0}}"
-          IOS_DEVICE="${BROWSERSTACK_IOS_DEVICE:-iPhone 16 Pro}"
-          IOS_VERSION="${BROWSERSTACK_IOS_PLATFORM_VERSION:-18}"
+          ANDROID_DEVICE="$(resolve_value "${BROWSERSTACK_ANDROID_DEVICE:-}" 'browserstack.android.device.name' "${DEFAULT_ANDROID_DEVICE:-Google Pixel 8}")"
+          ANDROID_VERSION="$(resolve_value "${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-}" 'browserstack.android.platform.version' "${DEFAULT_ANDROID_VERSION:-14.0}")"
+          IOS_DEVICE="$(resolve_value "${BROWSERSTACK_IOS_DEVICE:-}" 'browserstack.ios.device.name' "${DEFAULT_IOS_DEVICE:-iPhone 16 Pro}")"
+          IOS_VERSION="$(resolve_value "${BROWSERSTACK_IOS_PLATFORM_VERSION:-}" 'browserstack.ios.platform.version' "${DEFAULT_IOS_VERSION:-18}")"
 
           {
             echo "status=ok"
             echo "platform=${INPUT_PLATFORM}"
             echo "auth_http_code=${http_code}"
-            echo "project_name=${DEFAULT_PROJECT_NAME:-appium-mobile-automation-framework}"
+            echo "project_name=${PROJECT_NAME}"
             echo "android_device=${ANDROID_DEVICE}"
             echo "android_platform_version=${ANDROID_VERSION}"
             echo "ios_device=${IOS_DEVICE}"
@@ -165,11 +190,11 @@ jobs:
             target/ci-logs/browserstack-sanity-check.txt
           retention-days: 14
 
-      - name: 📋 Sanity Summary (Actions)
+      - name: 📋 Sanity Summary - Cucumber / Framework
         if: always()
         shell: bash
         run: |
-          echo "## 📋 Sanity Report - BrowserStack" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 📋 Sanity Report - Internal Checks" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Detalle | Valor |" >> "$GITHUB_STEP_SUMMARY"
           echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
@@ -177,17 +202,6 @@ jobs:
           echo "| Evento | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Rama | \\`${{ github.ref_name }}\\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -f target/ci-logs/browserstack-sanity-check.txt ]; then
-            echo "### 🔐 BrowserStack check" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            sed 's/^/- /' target/ci-logs/browserstack-sanity-check.txt >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### 🔐 BrowserStack check" >> "$GITHUB_STEP_SUMMARY"
-            echo "- No ejecutado." >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-          fi
 
           SUREFIRE_DIR="target/surefire-reports"
           if ls "$SUREFIRE_DIR"/*.xml 1>/dev/null 2>&1; then
@@ -203,6 +217,36 @@ jobs:
             echo "| $TOTAL | $PASSED | $FAILURES | $ERRORS | $SKIPPED |" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+          echo "### 🥒 Artefactos de Cucumber" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f target/cucumber-reports/cucumber.json ]; then
+            echo "- JSON: generado en \`target/cucumber-reports/cucumber.json\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- JSON: no generado" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -f target/cucumber-reports/cucumber.html ]; then
+            echo "- HTML: generado en \`target/cucumber-reports/cucumber.html\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- HTML: no generado" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📋 Sanity Summary - BrowserStack
+        if: always()
+        shell: bash
+        run: |
+          echo "## 🔐 Sanity Report - BrowserStack Checks" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -f target/ci-logs/browserstack-sanity-check.txt ]; then
+            sed 's/^/- /' target/ci-logs/browserstack-sanity-check.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- No ejecutado." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================================
   # Mobile tests: solo corren con dispatch manual en BrowserStack
@@ -282,6 +326,26 @@ jobs:
             fi
           }
 
+          resolve_value() {
+            local github_value="${1:-}"
+            local config_key="$2"
+            local fallback="${3:-}"
+            local config_value=""
+
+            if [ -n "$github_value" ]; then
+              printf '%s' "$github_value"
+              return 0
+            fi
+
+            config_value="$(read_prop "$config_key")"
+            if [ -n "$config_value" ]; then
+              printf '%s' "$config_value"
+              return 0
+            fi
+
+            printf '%s' "$fallback"
+          }
+
           if [ -z "$BROWSERSTACK_USERNAME" ] || [ -z "$BROWSERSTACK_ACCESS_KEY" ]; then
             echo "ERROR: BrowserStack credentials not found in repository secrets"
             exit 1
@@ -290,22 +354,26 @@ jobs:
           echo "::add-mask::$BROWSERSTACK_USERNAME"
           echo "::add-mask::$BROWSERSTACK_ACCESS_KEY"
 
+          DEFAULT_ANDROID_DEVICE="$(resolve_value '' 'browserstack.android.device.name' "$(read_prop 'device.name')")"
+          DEFAULT_ANDROID_VERSION="$(resolve_value '' 'browserstack.android.platform.version' "$(read_prop 'platform.version')")"
+          DEFAULT_IOS_DEVICE="$(resolve_value '' 'browserstack.ios.device.name' '${{ matrix.default_device }}')"
+          DEFAULT_IOS_VERSION="$(resolve_value '' 'browserstack.ios.platform.version' '${{ matrix.default_platform_version }}')"
+          PROJECT_NAME="$(resolve_value "${BROWSERSTACK_PROJECT_NAME:-}" 'browserstack.project.name' 'appium-mobile-automation-framework')"
+
           case "${{ matrix.platform }}" in
             android)
               APP_ID="$BROWSERSTACK_ANDROID_APP_ID"
-              APP_IDENTIFIER="$BROWSERSTACK_ANDROID_APP_PACKAGE"
+              APP_IDENTIFIER="$(resolve_value "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" 'app.package' '')"
               IDENTIFIER_KEY="app.package"
-              DEFAULT_DEVICE="$(read_prop 'device.name')"
-              DEFAULT_PLATFORM_VERSION="$(read_prop 'platform.version')"
-              DEVICE_NAME="${BROWSERSTACK_ANDROID_DEVICE:-${DEFAULT_DEVICE:-${{ matrix.default_device }}}}"
-              PLATFORM_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-${DEFAULT_PLATFORM_VERSION:-${{ matrix.default_platform_version }}}}"
+              DEVICE_NAME="$(resolve_value "${BROWSERSTACK_ANDROID_DEVICE:-}" 'browserstack.android.device.name' "${DEFAULT_ANDROID_DEVICE:-${{ matrix.default_device }}}")"
+              PLATFORM_VERSION="$(resolve_value "${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-}" 'browserstack.android.platform.version' "${DEFAULT_ANDROID_VERSION:-${{ matrix.default_platform_version }}}")"
               ;;
             ios)
               APP_ID="$BROWSERSTACK_IOS_APP_ID"
-              APP_IDENTIFIER="$BROWSERSTACK_IOS_BUNDLE_ID"
+              APP_IDENTIFIER="$(resolve_value "${BROWSERSTACK_IOS_BUNDLE_ID:-}" 'bundle.id' '')"
               IDENTIFIER_KEY="bundle.id"
-              DEVICE_NAME="${BROWSERSTACK_IOS_DEVICE:-${{ matrix.default_device }}}"
-              PLATFORM_VERSION="${BROWSERSTACK_IOS_PLATFORM_VERSION:-${{ matrix.default_platform_version }}}"
+              DEVICE_NAME="$(resolve_value "${BROWSERSTACK_IOS_DEVICE:-}" 'browserstack.ios.device.name' "${DEFAULT_IOS_DEVICE:-${{ matrix.default_device }}}")"
+              PLATFORM_VERSION="$(resolve_value "${BROWSERSTACK_IOS_PLATFORM_VERSION:-}" 'browserstack.ios.platform.version' "${DEFAULT_IOS_VERSION:-${{ matrix.default_platform_version }}}")"
               ;;
             *)
               echo "ERROR: Unsupported platform ${{ matrix.platform }}"
@@ -321,13 +389,11 @@ jobs:
 
           if [ -z "$APP_IDENTIFIER" ]; then
             echo "ERROR: Missing app identifier for platform=${{ matrix.platform }}"
-            echo "Hint: define repo variable $([ '${{ matrix.platform }}' = 'android' ] && echo 'BROWSERSTACK_ANDROID_APP_PACKAGE' || echo 'BROWSERSTACK_IOS_BUNDLE_ID')"
+            echo "Hint: define la propiedad $([ '${{ matrix.platform }}' = 'android' ] && echo 'app.package' || echo 'bundle.id') en config o la variable de GitHub correspondiente"
             echo "The current smoke scenario validates foreground state, so this identifier is required."
             exit 1
           fi
 
-          DEFAULT_PROJECT_NAME="$(read_prop 'browserstack.project.name')"
-          PROJECT_NAME="${BROWSERSTACK_PROJECT_NAME:-${DEFAULT_PROJECT_NAME:-appium-mobile-automation-framework}}"
           BUILD_NAME="${PROJECT_NAME} | run-${{ github.run_number }} | attempt-${{ github.run_attempt }}"
           SESSION_NAME="${{ matrix.platform }} | job-${{ github.job }} | sha-${GITHUB_SHA::7}"
           SERVER_URL="https://${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}@${BROWSERSTACK_HUB_HOST}/wd/hub"
