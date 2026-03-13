@@ -1,0 +1,619 @@
+name: 🌐📱 Mobile Tests - BrowserStack
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Plataforma(s) a ejecutar en BrowserStack
+        required: true
+        default: both
+        type: choice
+        options:
+          - android
+          - ios
+          - both
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browserstack-${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  JAVA_VERSION: '17'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  BROWSERSTACK_HUB_HOST: hub.browserstack.com
+
+jobs:
+  # ============================================================
+  # Sanity tests: corren en ubuntu en push/PR, sin dispositivo
+  # ============================================================
+  sanity-tests:
+    name: Sanity Tests (framework health)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      browserstack_auth_ok: ${{ steps.browserstack_auth_sanity.outputs.browserstack_auth_ok }}
+    # Corre siempre: push, PR y workflow_dispatch
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: 🧪 Run Sanity Tests - Unit Tests + Cucumber Health (sin dispositivo)
+        run: mvn test "-Drun.mobile.tests=false" -B
+
+      - name: 🔐 BrowserStack Auth Sanity (manual)
+        id: browserstack_auth_sanity
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          INPUT_PLATFORM: ${{ github.event.inputs.platform }}
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          BROWSERSTACK_ANDROID_APP_ID: ${{ secrets.BROWSERSTACK_ANDROID_APP_ID }}
+          BROWSERSTACK_IOS_APP_ID: ${{ secrets.BROWSERSTACK_IOS_APP_ID }}
+          BROWSERSTACK_ANDROID_APP_PACKAGE: ${{ vars.BROWSERSTACK_ANDROID_APP_PACKAGE }}
+          BROWSERSTACK_IOS_BUNDLE_ID: ${{ vars.BROWSERSTACK_IOS_BUNDLE_ID }}
+          BROWSERSTACK_ANDROID_DEVICE: ${{ vars.BROWSERSTACK_ANDROID_DEVICE }}
+          BROWSERSTACK_ANDROID_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_ANDROID_PLATFORM_VERSION }}
+          BROWSERSTACK_IOS_DEVICE: ${{ vars.BROWSERSTACK_IOS_DEVICE }}
+          BROWSERSTACK_IOS_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_IOS_PLATFORM_VERSION }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/ci-logs
+
+          echo "browserstack_auth_ok=false" >> "$GITHUB_OUTPUT"
+
+          if [ -z "${BROWSERSTACK_USERNAME:-}" ] || [ -z "${BROWSERSTACK_ACCESS_KEY:-}" ]; then
+            echo "ERROR: faltan secrets BROWSERSTACK_USERNAME/BROWSERSTACK_ACCESS_KEY" | tee target/ci-logs/browserstack-sanity-check.txt
+            exit 1
+          fi
+
+          echo "::add-mask::${BROWSERSTACK_USERNAME}"
+          echo "::add-mask::${BROWSERSTACK_ACCESS_KEY}"
+
+          http_code=$(curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" -o /dev/null -w "%{http_code}" "https://api-cloud.browserstack.com/app-automate/recent_apps")
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: BrowserStack auth check falló (HTTP ${http_code})" | tee target/ci-logs/browserstack-sanity-check.txt
+            exit 1
+          fi
+
+          case "${INPUT_PLATFORM}" in
+            android)
+              [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              ;;
+            ios)
+              [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_IOS_BUNDLE_ID:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              ;;
+            both)
+              [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_IOS_BUNDLE_ID:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              ;;
+            *)
+              echo "ERROR: platform no soportada: ${INPUT_PLATFORM}" | tee target/ci-logs/browserstack-sanity-check.txt
+              exit 1
+              ;;
+          esac
+
+          ANDROID_DEVICE="${BROWSERSTACK_ANDROID_DEVICE:-Google Pixel 8}"
+          ANDROID_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-14.0}"
+          IOS_DEVICE="${BROWSERSTACK_IOS_DEVICE:-iPhone 16 Pro}"
+          IOS_VERSION="${BROWSERSTACK_IOS_PLATFORM_VERSION:-18}"
+
+          {
+            echo "status=ok"
+            echo "platform=${INPUT_PLATFORM}"
+            echo "auth_http_code=${http_code}"
+            echo "android_device=${ANDROID_DEVICE}"
+            echo "android_platform_version=${ANDROID_VERSION}"
+            echo "ios_device=${IOS_DEVICE}"
+            echo "ios_platform_version=${IOS_VERSION}"
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee -a target/ci-logs/browserstack-sanity-check.txt
+
+          echo "browserstack_auth_ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Sanity Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanity-test-results-browserstack
+          if-no-files-found: warn
+          path: |
+            target/allure-results/
+            target/cucumber-reports/
+            target/surefire-reports/
+            target/ci-logs/browserstack-sanity-check.txt
+          retention-days: 14
+
+      - name: 📋 Sanity Summary (Actions)
+        if: always()
+        shell: bash
+        run: |
+          echo "## 📋 Sanity Report - BrowserStack" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Detalle | Valor |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Run | #${{ github.run_number }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Evento | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Rama | \\`${{ github.ref_name }}\\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -f target/ci-logs/browserstack-sanity-check.txt ]; then
+            echo "### 🔐 BrowserStack check" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            sed 's/^/- /' target/ci-logs/browserstack-sanity-check.txt >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### 🔐 BrowserStack check" >> "$GITHUB_STEP_SUMMARY"
+            echo "- No ejecutado (evento distinto a workflow_dispatch)." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          SUREFIRE_DIR="target/surefire-reports"
+          if ls "$SUREFIRE_DIR"/*.xml 1>/dev/null 2>&1; then
+            TOTAL=$(grep -h 'tests=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'tests="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            FAILURES=$(grep -h 'failures=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'failures="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            ERRORS=$(grep -h 'errors=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'errors="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            SKIPPED=$(grep -h 'skipped=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'skipped="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            TOTAL=${TOTAL:-0}; FAILURES=${FAILURES:-0}; ERRORS=${ERRORS:-0}; SKIPPED=${SKIPPED:-0}
+            PASSED=$((TOTAL - FAILURES - ERRORS - SKIPPED))
+            echo "### 🧪 Pruebas de sanidad ejecutadas" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Total | Passed | Failed | Errors | Skipped |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|------:|------:|------:|------:|-------:|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| $TOTAL | $PASSED | $FAILURES | $ERRORS | $SKIPPED |" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ============================================================
+  # Mobile tests: solo corren con dispatch manual en BrowserStack
+  # ============================================================
+  mobile-tests-browserstack:
+    name: "📱 Mobile Tests - BrowserStack (${{ matrix.platform_name }})"
+    needs: [ sanity-tests ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success' && needs['sanity-tests'].outputs.browserstack_auth_ok == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - platform: android
+            platform_name: Android
+            automation_name: UiAutomator2
+            default_device: Google Pixel 8
+            default_platform_version: '14.0'
+          - platform: ios
+            platform_name: iOS
+            automation_name: XCUITest
+            default_device: iPhone 16 Pro
+            default_platform_version: '18'
+
+    steps:
+      - name: ✅ Check platform selection
+        id: platform-check
+        run: |
+          INPUT="${{ github.event.inputs.platform }}"
+          PLATFORM="${{ matrix.platform }}"
+          if [[ "$INPUT" == "$PLATFORM" || "$INPUT" == "both" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "▶️ Platform $PLATFORM selected - will run tests"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "⏭️ Platform $PLATFORM not selected (input=$INPUT) - skipping"
+          fi
+
+      - name: Checkout code
+        if: steps.platform-check.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        if: steps.platform-check.outputs.should_run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Validate BrowserStack config and prepare runtime context
+        if: steps.platform-check.outputs.should_run == 'true'
+        shell: bash
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          BROWSERSTACK_ANDROID_APP_ID: ${{ secrets.BROWSERSTACK_ANDROID_APP_ID }}
+          BROWSERSTACK_IOS_APP_ID: ${{ secrets.BROWSERSTACK_IOS_APP_ID }}
+          BROWSERSTACK_ANDROID_APP_PACKAGE: ${{ vars.BROWSERSTACK_ANDROID_APP_PACKAGE }}
+          BROWSERSTACK_IOS_BUNDLE_ID: ${{ vars.BROWSERSTACK_IOS_BUNDLE_ID }}
+          BROWSERSTACK_PROJECT_NAME: ${{ vars.BROWSERSTACK_PROJECT_NAME }}
+          BROWSERSTACK_ANDROID_DEVICE: ${{ vars.BROWSERSTACK_ANDROID_DEVICE }}
+          BROWSERSTACK_ANDROID_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_ANDROID_PLATFORM_VERSION }}
+          BROWSERSTACK_IOS_DEVICE: ${{ vars.BROWSERSTACK_IOS_DEVICE }}
+          BROWSERSTACK_IOS_PLATFORM_VERSION: ${{ vars.BROWSERSTACK_IOS_PLATFORM_VERSION }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/ci-logs
+
+          if [ -z "$BROWSERSTACK_USERNAME" ] || [ -z "$BROWSERSTACK_ACCESS_KEY" ]; then
+            echo "ERROR: BrowserStack credentials not found in repository secrets"
+            exit 1
+          fi
+
+          echo "::add-mask::$BROWSERSTACK_USERNAME"
+          echo "::add-mask::$BROWSERSTACK_ACCESS_KEY"
+
+          case "${{ matrix.platform }}" in
+            android)
+              APP_ID="$BROWSERSTACK_ANDROID_APP_ID"
+              APP_IDENTIFIER="$BROWSERSTACK_ANDROID_APP_PACKAGE"
+              IDENTIFIER_KEY="app.package"
+              DEVICE_NAME="${BROWSERSTACK_ANDROID_DEVICE:-${{ matrix.default_device }}}"
+              PLATFORM_VERSION="${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-${{ matrix.default_platform_version }}}"
+              ;;
+            ios)
+              APP_ID="$BROWSERSTACK_IOS_APP_ID"
+              APP_IDENTIFIER="$BROWSERSTACK_IOS_BUNDLE_ID"
+              IDENTIFIER_KEY="bundle.id"
+              DEVICE_NAME="${BROWSERSTACK_IOS_DEVICE:-${{ matrix.default_device }}}"
+              PLATFORM_VERSION="${BROWSERSTACK_IOS_PLATFORM_VERSION:-${{ matrix.default_platform_version }}}"
+              ;;
+            *)
+              echo "ERROR: Unsupported platform ${{ matrix.platform }}"
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$APP_ID" ]; then
+            echo "ERROR: Missing BrowserStack app id for platform=${{ matrix.platform }}"
+            echo "Hint: define secret BROWSERSTACK_$(echo '${{ matrix.platform }}' | tr '[:lower:]' '[:upper:]')_APP_ID"
+            exit 1
+          fi
+
+          if [ -z "$APP_IDENTIFIER" ]; then
+            echo "ERROR: Missing app identifier for platform=${{ matrix.platform }}"
+            echo "Hint: define repo variable $([ '${{ matrix.platform }}' = 'android' ] && echo 'BROWSERSTACK_ANDROID_APP_PACKAGE' || echo 'BROWSERSTACK_IOS_BUNDLE_ID')"
+            echo "The current smoke scenario validates foreground state, so this identifier is required."
+            exit 1
+          fi
+
+          PROJECT_NAME="${BROWSERSTACK_PROJECT_NAME:-appium-mobile-automation-framework}"
+          BUILD_NAME="${PROJECT_NAME} | run-${{ github.run_number }} | attempt-${{ github.run_attempt }}"
+          SESSION_NAME="${{ matrix.platform }} | job-${{ github.job }} | sha-${GITHUB_SHA::7}"
+          SERVER_URL="https://${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}@${BROWSERSTACK_HUB_HOST}/wd/hub"
+          SANITIZED_SERVER_URL="https://***:***@${BROWSERSTACK_HUB_HOST}/wd/hub"
+
+          {
+            echo "platform=${{ matrix.platform }}"
+            echo "platform_name=${{ matrix.platform_name }}"
+            echo "automation_name=${{ matrix.automation_name }}"
+            echo "device_name=${DEVICE_NAME}"
+            echo "platform_version=${PLATFORM_VERSION}"
+            echo "identifier_key=${IDENTIFIER_KEY}"
+            echo "project_name=${PROJECT_NAME}"
+            echo "build_name=${BUILD_NAME}"
+            echo "session_name=${SESSION_NAME}"
+            echo "server_url=${SANITIZED_SERVER_URL}"
+          } | tee target/ci-logs/browserstack-context.txt
+
+          curl -fsSL "https://${BROWSERSTACK_HUB_HOST}/wd/hub/status" > target/ci-logs/browserstack-status.json || echo '{}' > target/ci-logs/browserstack-status.json
+
+          {
+            echo "BROWSERSTACK_SERVER_URL=${SERVER_URL}"
+            echo "BROWSERSTACK_APP_ID=${APP_ID}"
+            echo "BROWSERSTACK_APP_IDENTIFIER=${APP_IDENTIFIER}"
+            echo "BROWSERSTACK_IDENTIFIER_KEY=${IDENTIFIER_KEY}"
+            echo "BROWSERSTACK_DEVICE_NAME=${DEVICE_NAME}"
+            echo "BROWSERSTACK_PLATFORM_VERSION=${PLATFORM_VERSION}"
+            echo "BROWSERSTACK_PROJECT_NAME=${PROJECT_NAME}"
+            echo "BROWSERSTACK_BUILD_NAME=${BUILD_NAME}"
+            echo "BROWSERSTACK_SESSION_NAME=${SESSION_NAME}"
+          } >> "$GITHUB_ENV"
+
+      - name: Run Mobile Tests - BrowserStack
+        if: steps.platform-check.outputs.should_run == 'true'
+        shell: bash
+        env:
+          # Guardas adicionales: FrameworkConfig también lee variables de entorno.
+          ENV: browserstack
+          PLATFORM_NAME: ${{ matrix.platform_name }}
+          PLATFORM_VERSION: ${{ env.BROWSERSTACK_PLATFORM_VERSION }}
+          DEVICE_NAME: ${{ env.BROWSERSTACK_DEVICE_NAME }}
+          AUTOMATION_NAME: ${{ matrix.automation_name }}
+          APPIUM_SERVER_URL: ${{ env.BROWSERSTACK_SERVER_URL }}
+          APP: ${{ env.BROWSERSTACK_APP_ID }}
+          APP_PACKAGE: ${{ env.BROWSERSTACK_APP_IDENTIFIER }}
+          BUNDLE_ID: ${{ env.BROWSERSTACK_APP_IDENTIFIER }}
+        run: |
+          set -o pipefail
+          mkdir -p target/ci-logs
+
+          echo "env=browserstack" | tee -a target/ci-logs/browserstack-runtime-check.txt
+          echo "platform.name=${{ matrix.platform_name }}" | tee -a target/ci-logs/browserstack-runtime-check.txt
+          echo "device.name=${BROWSERSTACK_DEVICE_NAME}" | tee -a target/ci-logs/browserstack-runtime-check.txt
+          echo "platform.version=${BROWSERSTACK_PLATFORM_VERSION}" | tee -a target/ci-logs/browserstack-runtime-check.txt
+
+          MVN_ARGS=(
+            test
+            "-Denv=browserstack"
+            "-Drun.mobile.tests=true"
+            "-Dplatform.name=${{ matrix.platform_name }}"
+            "-Dplatform.version=${BROWSERSTACK_PLATFORM_VERSION}"
+            "-Ddevice.name=${BROWSERSTACK_DEVICE_NAME}"
+            "-Dautomation.name=${{ matrix.automation_name }}"
+            "-Dappium.server.url=${BROWSERSTACK_SERVER_URL}"
+            "-Dapp=${BROWSERSTACK_APP_ID}"
+            "-D${BROWSERSTACK_IDENTIFIER_KEY}=${BROWSERSTACK_APP_IDENTIFIER}"
+            "-Dbrowserstack.project.name=${BROWSERSTACK_PROJECT_NAME}"
+            "-Dbrowserstack.build.name=${BROWSERSTACK_BUILD_NAME}"
+            "-Dbrowserstack.session.name=${BROWSERSTACK_SESSION_NAME}"
+            "-Devidence.video.enabled=false"
+          )
+
+          printf '%s\n' "${MVN_ARGS[@]}" > target/ci-logs/maven-command-${{ matrix.platform }}.txt
+          mvn -V -e -B "${MVN_ARGS[@]}" 2>&1 | tee target/ci-logs/mobile-maven-${{ matrix.platform }}.log
+
+      - name: Print Maven log tail on failure
+        if: failure() && steps.platform-check.outputs.should_run == 'true'
+        shell: bash
+        run: |
+          echo "===== LAST 200 LINES OF target/ci-logs/mobile-maven-${{ matrix.platform }}.log ====="
+          tail -n 200 target/ci-logs/mobile-maven-${{ matrix.platform }}.log || true
+
+      - name: Upload BrowserStack Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-test-results-browserstack-${{ matrix.platform }}
+          if-no-files-found: warn
+          path: |
+            target/allure-results/
+            target/cucumber-reports/
+            target/surefire-reports/
+            target/ci-logs/
+            target/videos/
+            target/screenshots/
+          retention-days: 30
+
+      - name: 📊 Job Summary - BrowserStack Dashboard
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## 📱 Mobile Tests - BrowserStack (${{ matrix.platform_name }}) | Run #${{ github.run_number }}"
+            echo ""
+            echo "| Detail | Value |"
+            echo "|--------|-------|"
+            echo "| 🏃 Run | #${{ github.run_number }} |"
+            echo "| 📅 Date | $(date '+%Y-%m-%d %H:%M UTC') |"
+            echo "| 📱 Platform | ${{ matrix.platform_name }} |"
+            echo "| 📟 Device | ${BROWSERSTACK_DEVICE_NAME:-n/a} |"
+            echo "| 🧪 Build name | ${BROWSERSTACK_BUILD_NAME:-n/a} |"
+            echo "| 🆔 Session name | ${BROWSERSTACK_SESSION_NAME:-n/a} |"
+            echo "| 👤 Triggered by | ${{ github.actor }} |"
+            echo ""
+            echo "### 🌐 BrowserStack App Automate Dashboard"
+            echo ""
+            echo "👉 **[Ver sesión en BrowserStack](https://app-automate.browserstack.com/dashboard)**"
+            echo "> Videos, logs y screenshots del dispositivo disponibles en el dashboard oficial."
+            echo ""
+            echo "### 📦 Artifact de esta plataforma"
+            echo "- **mobile-test-results-browserstack-${{ matrix.platform }}**: allure-results, cucumber, surefire, ci-logs"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
+  # Publish Allure + Cucumber Report (BrowserStack)
+  # ============================================================
+  publish-report-browserstack:
+    name: 📊 Generate & Publish Report - BrowserStack
+    needs: [ mobile-tests-browserstack ]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && needs['mobile-tests-browserstack'].result == 'success'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download BrowserStack Results (Android)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: mobile-test-results-browserstack-android
+          path: downloaded-results
+
+      - name: Download BrowserStack Results (iOS)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: mobile-test-results-browserstack-ios
+          path: downloaded-results-ios
+
+      - name: Install Allure CLI
+        continue-on-error: true
+        run: |
+          if wget -qO allure.tgz https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.tgz \
+             && tar -xzf allure.tgz \
+             && sudo mv allure-2.29.0 /opt/allure \
+             && sudo ln -sf /opt/allure/bin/allure /usr/local/bin/allure; then
+            echo "ALLURE_CLI_READY=true" >> $GITHUB_ENV
+            allure --version || true
+          else
+            echo "ALLURE_CLI_READY=false" >> $GITHUB_ENV
+            echo "::warning::No se pudo instalar Allure CLI."
+          fi
+
+      - name: Generate Allure HTML Report
+        continue-on-error: true
+        run: |
+          RESULTS_DIR="downloaded-results/allure-results"
+          if [ "${ALLURE_CLI_READY:-false}" != "true" ]; then
+            echo "ALLURE_GENERATED=false" >> $GITHUB_ENV
+            echo "ALLURE_SKIP_REASON=No se pudo instalar Allure CLI." >> $GITHUB_ENV
+            exit 0
+          fi
+          if [ -d "$RESULTS_DIR" ] && allure generate "$RESULTS_DIR" --clean -o allure-report; then
+            echo "ALLURE_GENERATED=true" >> $GITHUB_ENV
+            echo "ALLURE_SKIP_REASON=" >> $GITHUB_ENV
+            echo "✅ Allure report generated"
+          else
+            echo "ALLURE_GENERATED=false" >> $GITHUB_ENV
+            echo "ALLURE_SKIP_REASON=No existe allure-results o falló la generación." >> $GITHUB_ENV
+            echo "::warning::No se pudo generar Allure HTML."
+          fi
+
+      - name: Upload Allure HTML Report as Artifact
+        if: env.ALLURE_GENERATED == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-html-report-browserstack-run-${{ github.run_number }}
+          path: allure-report/
+          retention-days: 30
+
+      - name: Publish Allure Report to public reports hub
+        if: env.ALLURE_GENERATED == 'true'
+        env:
+          REPORTS_REPO_PAT: ${{ secrets.REPORTS_REPO_PAT }}
+          REPORTS_REPO: Harp-Andres/automation-test-reports-hub
+        run: |
+          set -e
+          if [ -z "${REPORTS_REPO_PAT:-}" ]; then
+            echo "REPORTS_PUBLISHED=false" >> "$GITHUB_ENV"
+            echo "REPORTS_SKIP_REASON=Falta el secret REPORTS_REPO_PAT." >> "$GITHUB_ENV"
+            echo "::warning::No se publicó online: falta REPORTS_REPO_PAT."
+            exit 0
+          fi
+
+          PROJECT_ID="appium-mobile-automation-framework-browserstack"
+          RUN_DIR="$PROJECT_ID/runs/${{ github.run_number }}"
+          LATEST_DIR="$PROJECT_ID/latest"
+
+          echo "REPORT_PROJECT_ID=$PROJECT_ID" >> "$GITHUB_ENV"
+          echo "PUBLIC_REPORT_URL=https://harp-andres.github.io/automation-test-reports-hub/$LATEST_DIR/" >> "$GITHUB_ENV"
+          echo "PUBLIC_REPORT_RUN_URL=https://harp-andres.github.io/automation-test-reports-hub/$RUN_DIR/" >> "$GITHUB_ENV"
+
+          AUTH_URL="https://x-access-token:${REPORTS_REPO_PAT}@github.com/${REPORTS_REPO}.git"
+          mkdir -p reports-repo
+          cd reports-repo
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "$AUTH_URL"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages
+            git checkout -B gh-pages origin/gh-pages
+          else
+            git checkout --orphan gh-pages
+          fi
+
+          mkdir -p "$RUN_DIR" "$LATEST_DIR"
+          rm -rf "${RUN_DIR:?}"/* "${LATEST_DIR:?}"/*
+          cp -R ../allure-report/. "$RUN_DIR/"
+          cp -R ../allure-report/. "$LATEST_DIR/"
+
+          printf 'source_repo=%s\nrun_id=%s\nrun_number=%s\npublished_at_utc=%s\n' \
+            "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_NUMBER}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUN_DIR/_meta.txt"
+          cp "$RUN_DIR/_meta.txt" "$LATEST_DIR/_meta.txt"
+
+          git add "$PROJECT_ID"
+          if git diff --cached --quiet; then
+            echo "REPORTS_PUBLISHED=true" >> "$GITHUB_ENV"
+            echo "REPORTS_SKIP_REASON=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          git commit -m "report(browserstack): $PROJECT_ID run ${{ github.run_number }}"
+          git push origin gh-pages
+          echo "REPORTS_PUBLISHED=true" >> "$GITHUB_ENV"
+          echo "REPORTS_SKIP_REASON=" >> "$GITHUB_ENV"
+          echo "✅ Reporte publicado en hub público"
+
+      - name: 📊 Build Job Summary - BrowserStack Full Report
+        if: always()
+        run: |
+          RUN_ARTIFACTS_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+          PUBLIC_REPORT_URL="${PUBLIC_REPORT_URL:-}"
+          REPORTS_PUBLISHED="${REPORTS_PUBLISHED:-false}"
+
+          echo "## 📊 BrowserStack Test Report - Run #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ Detalle | 💾 Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏃 Run | **#${{ github.run_number }}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📅 Fecha | $(date '+%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌿 Rama | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 👤 Disparado por | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ☁️ Cloud | BrowserStack App Automate |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Cucumber JSON (disponible como artifact)
+          if [ -f "downloaded-results/cucumber-reports/cucumber.json" ]; then
+            echo "### 🥒 Escenarios Cucumber" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Archivo generado: \\`downloaded-results/cucumber-reports/cucumber.json\\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Revisa el artifact para detalle por escenario." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Surefire XML
+          SUREFIRE_DIR="downloaded-results/surefire-reports"
+          if ls "$SUREFIRE_DIR"/*.xml 1>/dev/null 2>&1; then
+            TOTAL=$(grep -h 'tests=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'tests="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            FAILURES=$(grep -h 'failures=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'failures="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            ERRORS=$(grep -h 'errors=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'errors="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            SKIPPED=$(grep -h 'skipped=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'skipped="\K[0-9]+' | awk '{s+=$1}END{print s}')
+            TOTAL=${TOTAL:-0}; FAILURES=${FAILURES:-0}; ERRORS=${ERRORS:-0}; SKIPPED=${SKIPPED:-0}
+            PASSED=$((TOTAL - FAILURES - ERRORS - SKIPPED))
+            if [ "$FAILURES" -eq 0 ] && [ "$ERRORS" -eq 0 ]; then STATUS="✅ PASSED"; else STATUS="❌ FAILED"; fi
+            echo "### 🧪 Resultados Surefire" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Estado | Total | ✅ Passed | ❌ Failed | ⚠️ Errors | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|-----------|-----------|-----------|------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| $STATUS | **$TOTAL** | **$PASSED** | **$FAILURES** | **$ERRORS** | **$SKIPPED** |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### 📁 Artefactos" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **allure-html-report-browserstack-run-${{ github.run_number }}**: Reporte Allure HTML" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **mobile-test-results-browserstack-android**: Resultados Android" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **mobile-test-results-browserstack-ios**: Resultados iOS (si aplica)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[🔗 Abrir sección Artifacts →]($RUN_ARTIFACTS_URL)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$REPORTS_PUBLISHED" = "true" ] && [ -n "$PUBLIC_REPORT_URL" ]; then
+            echo "### 🌐 Reporte Online (Public Hub)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**👉 [Ver reporte Allure latest →]($PUBLIC_REPORT_URL)**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "[📚 Ver todos los históricos →](https://harp-andres.github.io/automation-test-reports-hub/)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### 🌐 BrowserStack Dashboard" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**👉 [Ver sesiones en BrowserStack App Automate](https://app-automate.browserstack.com/dashboard)**" >> $GITHUB_STEP_SUMMARY
+          echo "> Videos, logs y screenshots por dispositivo disponibles en el dashboard oficial." >> $GITHUB_STEP_SUMMARY
+
