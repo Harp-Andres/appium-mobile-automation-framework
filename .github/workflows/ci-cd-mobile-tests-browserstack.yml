@@ -500,10 +500,46 @@ jobs:
             echo "BROWSERSTACK_SESSION_NAME=${SESSION_NAME}"
           } >> "$GITHUB_ENV"
 
+      - name: Verificar validez de la app Android en BrowserStack (preflight)
+        if: steps.platform-check.outputs.should_run == 'true' && matrix.platform == 'android' && env.BROWSERSTACK_APP_ID != ''
+        shell: bash
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          BROWSERSTACK_APP_ID: ${{ env.BROWSERSTACK_APP_ID }}
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" \
+            "https://api-cloud.browserstack.com/app-automate/recent_apps/${BROWSERSTACK_APP_ID}.json")
+          if echo "$response" | grep -q '"error"'; then
+            echo "::error::La app Android no es válida en BrowserStack o no se encuentra. Respuesta: $response"
+            exit 1
+          fi
+          echo "La app Android es válida en BrowserStack."
+      - name: Verificar validez de la app iOS en BrowserStack (preflight)
+        if: steps.platform-check.outputs.should_run == 'true' && matrix.platform == 'ios' && env.BROWSERSTACK_APP_ID != ''
+        shell: bash
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          BROWSERSTACK_APP_ID: ${{ env.BROWSERSTACK_APP_ID }}
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" \
+            "https://api-cloud.browserstack.com/app-automate/recent_apps/${BROWSERSTACK_APP_ID}.json")
+          if echo "$response" | grep -q '"error"'; then
+            echo "::error::La app iOS no es válida en BrowserStack o no se encuentra. Respuesta: $response"
+            exit 1
+          fi
+          echo "La app iOS es válida en BrowserStack."
+
       - name: Preflight BrowserStack session (fail-fast)
         id: preflight
         if: steps.platform-check.outputs.should_run == 'true'
         shell: bash
+        env:
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
         run: |
           set -euo pipefail
           mkdir -p target/ci-logs
@@ -877,7 +913,6 @@ jobs:
             ERRORS=$(grep -h 'errors=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'errors="\K[0-9]+' | awk '{s+=$1}END{print s}')
             SKIPPED=$(grep -h 'skipped=' "$SUREFIRE_DIR"/*.xml 2>/dev/null | grep -oP 'skipped="\K[0-9]+' | awk '{s+=$1}END{print s}')
             TOTAL=${TOTAL:-0}; FAILURES=${FAILURES:-0}; ERRORS=${ERRORS:-0}; SKIPPED=${SKIPPED:-0}
-            PASSED=$((TOTAL - FAILURES - ERRORS - SKIPPED))
             if [ "$FAILURES" -eq 0 ] && [ "$ERRORS" -eq 0 ]; then STATUS="✅ PASSED"; else STATUS="❌ FAILED"; fi
             echo "### 🧪 Resultados Surefire" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
