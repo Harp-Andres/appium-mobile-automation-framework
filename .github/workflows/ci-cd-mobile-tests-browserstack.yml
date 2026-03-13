@@ -29,6 +29,8 @@ env:
   JAVA_VERSION: '17'
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   BROWSERSTACK_HUB_HOST: hub.browserstack.com
+  MOBILE_PRECHECK_TIMEOUT_MINUTES: '4'
+  MOBILE_TEST_TIMEOUT_MINUTES: '12'
 
 jobs:
   # ============================================================
@@ -327,10 +329,10 @@ jobs:
     name: "📱 Mobile Tests - BrowserStack (${{ matrix.platform_name }})"
     needs: [ sanity-tests ]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 35
     if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success' && needs['sanity-tests'].outputs.browserstack_auth_ok == 'true'
     strategy:
-      fail-fast: false
+      fail-fast: true
       max-parallel: 2
       matrix:
         include:
@@ -498,8 +500,88 @@ jobs:
             echo "BROWSERSTACK_SESSION_NAME=${SESSION_NAME}"
           } >> "$GITHUB_ENV"
 
-      - name: Run Mobile Tests - BrowserStack
+      - name: Preflight BrowserStack session (fail-fast)
+        id: preflight
         if: steps.platform-check.outputs.should_run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/ci-logs
+
+          PRECHECK_FILE="target/ci-logs/browserstack-preflight.txt"
+          RESPONSE_FILE="target/ci-logs/browserstack-preflight-response.json"
+          echo "preflight_ok=false" >> "$GITHUB_OUTPUT"
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "capabilities": {
+              "alwaysMatch": {
+                "platformName": "${{ matrix.platform == 'android' && 'ANDROID' || 'IOS' }}",
+                "appium:automationName": "${{ matrix.automation_name }}",
+                "appium:deviceName": "${BROWSERSTACK_DEVICE_NAME}",
+                "appium:platformVersion": "${BROWSERSTACK_PLATFORM_VERSION}",
+                "appium:app": "${BROWSERSTACK_APP_ID}",
+                "bstack:options": {
+                  "projectName": "${BROWSERSTACK_PROJECT_NAME}",
+                  "buildName": "${BROWSERSTACK_BUILD_NAME}",
+                  "sessionName": "${BROWSERSTACK_SESSION_NAME} | preflight",
+                  "idleTimeout": 90,
+                  "appiumLogs": true,
+                  "networkLogs": true,
+                  "deviceLogs": true,
+                  "debug": true,
+                  "video": true
+                }
+              }
+            }
+          }
+          EOF
+          )
+
+          http_code=$(curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" \
+            -H "Content-Type: application/json" \
+            -o "$RESPONSE_FILE" \
+            -w "%{http_code}" \
+            -X POST "https://${BROWSERSTACK_HUB_HOST}/wd/hub/session" \
+            -d "$PAYLOAD")
+
+          session_id=$(python -c "import json; d=json.load(open('$RESPONSE_FILE',encoding='utf-8')); print((d.get('value') or {}).get('sessionId') or d.get('sessionId') or '')")
+          message=$(python -c "import json; d=json.load(open('$RESPONSE_FILE',encoding='utf-8')); print(((d.get('value') or {}).get('message') or '').replace('\n',' ')[:280])")
+
+          if [ "$http_code" = "200" ] && [ -n "$session_id" ]; then
+            echo "preflight_status=ok" | tee "$PRECHECK_FILE"
+            echo "preflight_http_code=${http_code}" | tee -a "$PRECHECK_FILE"
+            echo "preflight_message=session created" | tee -a "$PRECHECK_FILE"
+            echo "preflight_session_id=${session_id}" | tee -a "$PRECHECK_FILE"
+
+            curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" \
+              -X DELETE "https://${BROWSERSTACK_HUB_HOST}/wd/hub/session/${session_id}" >/dev/null || true
+
+            echo "preflight_ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          category="unknown"
+          if echo "$message" | grep -qi "Something went wrong with app launch"; then
+            category="app-launch-or-config"
+          elif echo "$message" | grep -qiE "auth|unauthorized|forbidden|access"; then
+            category="credentials"
+          elif echo "$message" | grep -qiE "device|queued|capacity|timed out|infrastructure"; then
+            category="browserstack-infrastructure"
+          fi
+
+          {
+            echo "preflight_status=fail"
+            echo "preflight_http_code=${http_code}"
+            echo "preflight_category=${category}"
+            echo "preflight_message=${message:-no-message}"
+          } | tee "$PRECHECK_FILE"
+
+          echo "::error::Preflight BrowserStack falló (${category}). Mensaje: ${message:-sin mensaje}"
+          exit 1
+
+      - name: Run Mobile Tests - BrowserStack
+        if: steps.platform-check.outputs.should_run == 'true' && steps.preflight.outputs.preflight_ok == 'true'
         shell: bash
         env:
           # Guardas adicionales: FrameworkConfig también lee variables de entorno.
@@ -525,6 +607,8 @@ jobs:
             test
             "-Denv=browserstack"
             "-Drun.mobile.tests=true"
+            "-Dsurefire.skipAfterFailureCount=1"
+            "-Dsurefire.rerunFailingTestsCount=0"
             "-Dplatform.name=${{ matrix.platform_name }}"
             "-Dplatform.version=${BROWSERSTACK_PLATFORM_VERSION}"
             "-Ddevice.name=${BROWSERSTACK_DEVICE_NAME}"
@@ -539,7 +623,28 @@ jobs:
           )
 
           printf '%s\n' "${MVN_ARGS[@]}" > target/ci-logs/maven-command-${{ matrix.platform }}.txt
-          mvn -V -e -B "${MVN_ARGS[@]}" 2>&1 | tee target/ci-logs/mobile-maven-${{ matrix.platform }}.log
+          timeout "${MOBILE_TEST_TIMEOUT_MINUTES}m" mvn -V -e -B "${MVN_ARGS[@]}" 2>&1 | tee target/ci-logs/mobile-maven-${{ matrix.platform }}.log
+          cmd_rc=${PIPESTATUS[0]}
+
+          if [ "$cmd_rc" -eq 124 ]; then
+            {
+              echo "failfast_reason=maven-timeout"
+              echo "failfast_timeout_minutes=${MOBILE_TEST_TIMEOUT_MINUTES}"
+            } | tee target/ci-logs/mobile-failfast.txt
+            echo "::error::Se cortó ejecución por timeout (${MOBILE_TEST_TIMEOUT_MINUTES}m) para proteger minutos de BrowserStack"
+            exit 1
+          fi
+
+          if grep -qi "Could not start a session. Something went wrong with app launch" target/ci-logs/mobile-maven-${{ matrix.platform }}.log; then
+            {
+              echo "failfast_reason=browserstack-session-start"
+              echo "failfast_hint=verificar app id bs://, app.package/bundle.id, capacidad de dispositivo"
+            } | tee target/ci-logs/mobile-failfast.txt
+            echo "::error::Fallo de inicio de sesión BrowserStack detectado (infra/app-launch/config)."
+            exit 1
+          fi
+
+          exit "$cmd_rc"
 
       - name: Print Maven log tail on failure
         if: failure() && steps.platform-check.outputs.should_run == 'true'
@@ -580,6 +685,24 @@ jobs:
             echo "| 🆔 Session name | ${BROWSERSTACK_SESSION_NAME:-n/a} |"
             echo "| 👤 Triggered by | ${{ github.actor }} |"
             echo ""
+            if [ -f target/ci-logs/browserstack-preflight.txt ]; then
+              echo "### 🩺 Preflight BrowserStack"
+              echo ""
+              echo "| Campo | Valor |"
+              echo "|---|---|"
+              while IFS='=' read -r key value; do
+                [ -n "${key:-}" ] || continue
+                printf '| %s | %s |\n' "$key" "$value"
+              done < target/ci-logs/browserstack-preflight.txt
+              echo ""
+            fi
+
+            if [ -f target/ci-logs/mobile-failfast.txt ]; then
+              echo "### ⛔ Corte preventivo"
+              sed 's/^/- /' target/ci-logs/mobile-failfast.txt
+              echo ""
+            fi
+
             echo "### 🌐 BrowserStack App Automate Dashboard"
             echo ""
             echo "👉 **[Ver sesión en BrowserStack](https://app-automate.browserstack.com/dashboard)**"
