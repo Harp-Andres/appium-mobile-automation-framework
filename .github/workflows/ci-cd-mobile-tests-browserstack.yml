@@ -548,6 +548,16 @@ jobs:
           RESPONSE_FILE="target/ci-logs/browserstack-preflight-response.json"
           echo "preflight_ok=false" >> "$GITHUB_OUTPUT"
 
+          echo "========== [PRE-FLIGHT LOG] Variables de entorno relevantes =========="
+          echo "BROWSERSTACK_APP_ID: $BROWSERSTACK_APP_ID"
+          echo "BROWSERSTACK_DEVICE_NAME: $BROWSERSTACK_DEVICE_NAME"
+          echo "BROWSERSTACK_PLATFORM_VERSION: $BROWSERSTACK_PLATFORM_VERSION"
+          echo "BROWSERSTACK_PROJECT_NAME: $BROWSERSTACK_PROJECT_NAME"
+          echo "BROWSERSTACK_BUILD_NAME: $BROWSERSTACK_BUILD_NAME"
+          echo "BROWSERSTACK_SESSION_NAME: $BROWSERSTACK_SESSION_NAME"
+          echo "====================================================================="
+
+          echo "========== [PRE-FLIGHT LOG] Payload enviado a BrowserStack =========="
           PAYLOAD=$(cat <<EOF
           {
             "capabilities": {
@@ -573,16 +583,25 @@ jobs:
           }
           EOF
           )
+          echo "$PAYLOAD"
+          echo "====================================================================="
 
+          echo "========== [PRE-FLIGHT LOG] Lanzando curl a BrowserStack... =========="
           http_code=$(curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" \
             -H "Content-Type: application/json" \
             -o "$RESPONSE_FILE" \
             -w "%{http_code}" \
             -X POST "https://${BROWSERSTACK_HUB_HOST}/wd/hub/session" \
             -d "$PAYLOAD")
+          echo "HTTP code recibido: $http_code"
+          echo "====================================================================="
+
+          echo "========== [PRE-FLIGHT LOG] Respuesta completa de BrowserStack =========="
+          cat "$RESPONSE_FILE"
+          echo "====================================================================="
 
           session_id=$(python -c "import json; d=json.load(open('$RESPONSE_FILE',encoding='utf-8')); print((d.get('value') or {}).get('sessionId') or d.get('sessionId') or '')")
-          message=$(python -c "import json; d=json.load(open('$RESPONSE_FILE',encoding='utf-8')); print(((d.get('value') or {}).get('message') or '').replace('\n',' ')[:280])")
+          message=$(python -c "import json; d=json.load(open('$RESPONSE_FILE',encoding='utf-8')); print(((d.get('value') or {}).get('message') or d.get('message') or '').replace('\\n',' ')[:280])")
 
           if [ "$http_code" = "200" ] && [ -n "$session_id" ]; then
             echo "preflight_status=ok" | tee "$PRECHECK_FILE"
@@ -594,6 +613,7 @@ jobs:
               -X DELETE "https://${BROWSERSTACK_HUB_HOST}/wd/hub/session/${session_id}" >/dev/null || true
 
             echo "preflight_ok=true" >> "$GITHUB_OUTPUT"
+            echo "========== [PRE-FLIGHT LOG] Sesión creada y eliminada correctamente =========="
             exit 0
           fi
 
@@ -614,6 +634,7 @@ jobs:
           } | tee "$PRECHECK_FILE"
 
           echo "::error::Preflight BrowserStack falló (${category}). Mensaje: ${message:-sin mensaje}"
+          echo "========== [PRE-FLIGHT LOG] Fin de logs de error =========="
           exit 1
 
       - name: Run Mobile Tests - BrowserStack
