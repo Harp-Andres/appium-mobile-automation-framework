@@ -214,14 +214,30 @@ jobs:
       - name: Run Mobile Tests - BrowserStack
         if: steps.platform-check.outputs.should_run == 'true'
         shell: bash
+        env:
+          # Guardas adicionales: FrameworkConfig también lee variables de entorno.
+          ENV: browserstack
+          PLATFORM_NAME: ${{ matrix.platform_name }}
+          PLATFORM_VERSION: ${{ env.BROWSERSTACK_PLATFORM_VERSION }}
+          DEVICE_NAME: ${{ env.BROWSERSTACK_DEVICE_NAME }}
+          AUTOMATION_NAME: ${{ matrix.automation_name }}
+          APPIUM_SERVER_URL: ${{ env.BROWSERSTACK_SERVER_URL }}
+          APP: ${{ env.BROWSERSTACK_APP_ID }}
+          APP_PACKAGE: ${{ env.BROWSERSTACK_APP_IDENTIFIER }}
+          BUNDLE_ID: ${{ env.BROWSERSTACK_APP_IDENTIFIER }}
         run: |
           set -o pipefail
           mkdir -p target/ci-logs
 
+          echo "env=browserstack" | tee -a target/ci-logs/browserstack-runtime-check.txt
+          echo "platform.name=${{ matrix.platform_name }}" | tee -a target/ci-logs/browserstack-runtime-check.txt
+          echo "device.name=${BROWSERSTACK_DEVICE_NAME}" | tee -a target/ci-logs/browserstack-runtime-check.txt
+          echo "platform.version=${BROWSERSTACK_PLATFORM_VERSION}" | tee -a target/ci-logs/browserstack-runtime-check.txt
+
           MVN_ARGS=(
             test
-            "-Drun.mobile.tests=true"
             "-Denv=browserstack"
+            "-Drun.mobile.tests=true"
             "-Dplatform.name=${{ matrix.platform_name }}"
             "-Dplatform.version=${BROWSERSTACK_PLATFORM_VERSION}"
             "-Ddevice.name=${BROWSERSTACK_DEVICE_NAME}"
@@ -487,6 +503,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**👉 [Ver sesiones en BrowserStack App Automate](https://app-automate.browserstack.com/dashboard)**" >> $GITHUB_STEP_SUMMARY
           echo "> Videos, logs y screenshots por dispositivo disponibles en el dashboard oficial." >> $GITHUB_STEP_SUMMARY
-
-
 
