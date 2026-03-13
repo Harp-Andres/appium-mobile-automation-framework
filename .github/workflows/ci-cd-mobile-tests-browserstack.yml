@@ -54,7 +54,11 @@ jobs:
           cache: maven
 
       - name: 🧪 Run Sanity Tests - Unit Tests + Cucumber Health (sin dispositivo)
-        run: mvn test "-Drun.mobile.tests=false" -B
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p target/ci-logs
+          mvn -V -e -B test "-Drun.mobile.tests=false" "-Dcucumber.filter.tags=not @mobile" 2>&1 | tee target/ci-logs/sanity-maven.log
 
       - name: 🔐 BrowserStack Auth Sanity Check
         id: browserstack_auth_sanity
@@ -77,6 +81,8 @@ jobs:
           set -euo pipefail
           mkdir -p target/ci-logs
           CONFIG_FILE="src/test/resources/config/browserstack.properties"
+          CHECK_FILE="target/ci-logs/browserstack-sanity-check.txt"
+          CHECK_TABLE_FILE="target/ci-logs/browserstack-sanity-checks.md"
 
           read_prop() {
             local key="$1"
@@ -105,7 +111,29 @@ jobs:
             printf '%s' "$fallback"
           }
 
+          add_check() {
+            local check_name="$1"
+            local status="$2"
+            local evidence="$3"
+            printf '| %s | %s | %s |\n' "$check_name" "$status" "$evidence" >> "$CHECK_TABLE_FILE"
+          }
+
+          require_value() {
+            local check_name="$1"
+            local value="${2:-}"
+            local hint="$3"
+            if [ -z "$value" ]; then
+              add_check "$check_name" "FAIL" "$hint"
+              echo "ERROR: ${hint}" | tee "$CHECK_FILE"
+              exit 1
+            fi
+            add_check "$check_name" "OK" "$hint"
+          }
+
           echo "browserstack_auth_ok=false" >> "$GITHUB_OUTPUT"
+          : > "$CHECK_FILE"
+          echo "| Check | Resultado | Evidencia |" > "$CHECK_TABLE_FILE"
+          echo "|---|---|---|" >> "$CHECK_TABLE_FILE"
 
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             INPUT_PLATFORM="${INPUT_PLATFORM:-both}"
@@ -114,18 +142,22 @@ jobs:
           fi
 
           if [ -z "${BROWSERSTACK_USERNAME:-}" ] || [ -z "${BROWSERSTACK_ACCESS_KEY:-}" ]; then
-            echo "ERROR: faltan secrets BROWSERSTACK_USERNAME/BROWSERSTACK_ACCESS_KEY" | tee target/ci-logs/browserstack-sanity-check.txt
+            add_check "Credenciales BrowserStack" "FAIL" "Faltan secrets BROWSERSTACK_USERNAME/BROWSERSTACK_ACCESS_KEY"
+            echo "ERROR: faltan secrets BROWSERSTACK_USERNAME/BROWSERSTACK_ACCESS_KEY" | tee "$CHECK_FILE"
             exit 1
           fi
 
           echo "::add-mask::${BROWSERSTACK_USERNAME}"
           echo "::add-mask::${BROWSERSTACK_ACCESS_KEY}"
+          add_check "Credenciales BrowserStack" "OK" "Secrets presentes y enmascarados"
 
           http_code=$(curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" -o /dev/null -w "%{http_code}" "https://api-cloud.browserstack.com/app-automate/recent_apps")
           if [ "$http_code" != "200" ]; then
-            echo "ERROR: BrowserStack auth check falló (HTTP ${http_code})" | tee target/ci-logs/browserstack-sanity-check.txt
+            add_check "Autenticacion API BrowserStack" "FAIL" "HTTP ${http_code} en /recent_apps"
+            echo "ERROR: BrowserStack auth check fallo (HTTP ${http_code})" | tee "$CHECK_FILE"
             exit 1
           fi
+          add_check "Autenticacion API BrowserStack" "OK" "HTTP 200 en /recent_apps"
 
           DEFAULT_ANDROID_DEVICE="$(resolve_value '' 'browserstack.android.device.name' "$(read_prop 'device.name')")"
           DEFAULT_ANDROID_VERSION="$(resolve_value '' 'browserstack.android.platform.version' "$(read_prop 'platform.version')")"
@@ -137,23 +169,25 @@ jobs:
 
           case "${INPUT_PLATFORM}" in
             push-auth-only)
+              add_check "Validacion por plataforma" "OK" "Push: solo validacion de autenticacion"
               ;;
             android)
-              [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "$ANDROID_APP_PACKAGE" ] || { echo "ERROR: falta app.package en config o variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              require_value "Android app id" "${BROWSERSTACK_ANDROID_APP_ID:-}" "Secret BROWSERSTACK_ANDROID_APP_ID disponible"
+              require_value "Android app package" "$ANDROID_APP_PACKAGE" "app.package en config o BROWSERSTACK_ANDROID_APP_PACKAGE"
               ;;
             ios)
-              [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "$IOS_BUNDLE_ID" ] || { echo "ERROR: falta bundle.id en config o variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              require_value "iOS app id" "${BROWSERSTACK_IOS_APP_ID:-}" "Secret BROWSERSTACK_IOS_APP_ID disponible"
+              require_value "iOS bundle id" "$IOS_BUNDLE_ID" "bundle.id en config o BROWSERSTACK_IOS_BUNDLE_ID"
               ;;
             both)
-              [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "$ANDROID_APP_PACKAGE" ] || { echo "ERROR: falta app.package en config o variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
-              [ -n "$IOS_BUNDLE_ID" ] || { echo "ERROR: falta bundle.id en config o variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              require_value "Android app id" "${BROWSERSTACK_ANDROID_APP_ID:-}" "Secret BROWSERSTACK_ANDROID_APP_ID disponible"
+              require_value "Android app package" "$ANDROID_APP_PACKAGE" "app.package en config o BROWSERSTACK_ANDROID_APP_PACKAGE"
+              require_value "iOS app id" "${BROWSERSTACK_IOS_APP_ID:-}" "Secret BROWSERSTACK_IOS_APP_ID disponible"
+              require_value "iOS bundle id" "$IOS_BUNDLE_ID" "bundle.id en config o BROWSERSTACK_IOS_BUNDLE_ID"
               ;;
             *)
-              echo "ERROR: platform no soportada: ${INPUT_PLATFORM}" | tee target/ci-logs/browserstack-sanity-check.txt
+              add_check "Validacion por plataforma" "FAIL" "platform no soportada: ${INPUT_PLATFORM}"
+              echo "ERROR: platform no soportada: ${INPUT_PLATFORM}" | tee "$CHECK_FILE"
               exit 1
               ;;
           esac
@@ -162,6 +196,7 @@ jobs:
           ANDROID_VERSION="$(resolve_value "${BROWSERSTACK_ANDROID_PLATFORM_VERSION:-}" 'browserstack.android.platform.version' "${DEFAULT_ANDROID_VERSION:-14.0}")"
           IOS_DEVICE="$(resolve_value "${BROWSERSTACK_IOS_DEVICE:-}" 'browserstack.ios.device.name' "${DEFAULT_IOS_DEVICE:-iPhone 16 Pro}")"
           IOS_VERSION="$(resolve_value "${BROWSERSTACK_IOS_PLATFORM_VERSION:-}" 'browserstack.ios.platform.version' "${DEFAULT_IOS_VERSION:-18}")"
+          add_check "Resolucion de defaults" "OK" "config/browserstack.properties y vars de GitHub evaluados"
 
           {
             echo "status=ok"
@@ -173,7 +208,7 @@ jobs:
             echo "ios_device=${IOS_DEVICE}"
             echo "ios_platform_version=${IOS_VERSION}"
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } | tee -a target/ci-logs/browserstack-sanity-check.txt
+          } | tee -a "$CHECK_FILE"
 
           echo "browserstack_auth_ok=true" >> "$GITHUB_OUTPUT"
 
@@ -187,7 +222,9 @@ jobs:
             target/allure-results/
             target/cucumber-reports/
             target/surefire-reports/
+            target/ci-logs/sanity-maven.log
             target/ci-logs/browserstack-sanity-check.txt
+            target/ci-logs/browserstack-sanity-checks.md
           retention-days: 14
 
       - name: 📋 Sanity Summary - Cucumber / Framework
@@ -200,7 +237,8 @@ jobs:
           echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Run | #${{ github.run_number }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Evento | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Rama | \\`${{ github.ref_name }}\\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Rama | \`${{ github.ref_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Scope de sanidad | Unit tests + Cucumber no @mobile |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           SUREFIRE_DIR="target/surefire-reports"
@@ -215,22 +253,38 @@ jobs:
             echo "| Total | Passed | Failed | Errors | Skipped |" >> "$GITHUB_STEP_SUMMARY"
             echo "|------:|------:|------:|------:|-------:|" >> "$GITHUB_STEP_SUMMARY"
             echo "| $TOTAL | $PASSED | $FAILURES | $ERRORS | $SKIPPED |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$SKIPPED" -gt 0 ]; then
+              echo "- Nota: los skipped corresponden a escenarios @mobile excluidos por diseño en sanity." >> "$GITHUB_STEP_SUMMARY"
+            fi
             echo "" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          echo "### 🥒 Artefactos de Cucumber" >> "$GITHUB_STEP_SUMMARY"
           if [ -f target/cucumber-reports/cucumber.json ]; then
-            echo "- JSON: generado en \`target/cucumber-reports/cucumber.json\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "### 🥒 Resumen Cucumber (que verifico)" >> "$GITHUB_STEP_SUMMARY"
+            python -c "import json,pathlib;d=json.loads(pathlib.Path('target/cucumber-reports/cucumber.json').read_text(encoding='utf-8'));sc=[e.get('name','Scenario') for f in d for e in f.get('elements',[]) if e.get('type') in (None,'scenario')];print();print('| Escenarios detectados |');print('|---:|');print(f'| {len(sc)} |');print();print('| Escenario |');print('|---|');[print(f'| {n} |') for n in sc[:12]]" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- JSON: no generado" >> "$GITHUB_STEP_SUMMARY"
+            echo "### 🥒 Resumen Cucumber" >> "$GITHUB_STEP_SUMMARY"
+            echo "- No se encontro \`target/cucumber-reports/cucumber.json\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          if [ -f target/cucumber-reports/cucumber.html ]; then
-            echo "- HTML: generado en \`target/cucumber-reports/cucumber.html\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🧾 Logs de sanidad (ultimas 30 lineas)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f target/ci-logs/sanity-maven.log ]; then
+            echo "- Señales de fallo detectadas (si aplica):" >> "$GITHUB_STEP_SUMMARY"
+            if grep -E "(ERROR|FAILURE|BUILD FAILURE|Tests run:)" target/ci-logs/sanity-maven.log >/tmp/sanity-fail-signals.txt; then
+              echo '```text' >> "$GITHUB_STEP_SUMMARY"
+              tail -n 12 /tmp/sanity-fail-signals.txt >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- No se detectaron señales de error en el log." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 30 target/ci-logs/sanity-maven.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- HTML: no generado" >> "$GITHUB_STEP_SUMMARY"
+            echo "- No se encontro \`target/ci-logs/sanity-maven.log\`." >> "$GITHUB_STEP_SUMMARY"
           fi
-
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 📋 Sanity Summary - BrowserStack
@@ -240,8 +294,26 @@ jobs:
           echo "## 🔐 Sanity Report - BrowserStack Checks" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
+          echo "### Que verifico" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Autenticacion contra API de BrowserStack." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Presencia de ids de app/identificadores por plataforma seleccionada." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Resolucion de propiedades (config por defecto + override desde GitHub)." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -f target/ci-logs/browserstack-sanity-checks.md ]; then
+            echo "### Resultado de checks" >> "$GITHUB_STEP_SUMMARY"
+            cat target/ci-logs/browserstack-sanity-checks.md >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           if [ -f target/ci-logs/browserstack-sanity-check.txt ]; then
-            sed 's/^/- /' target/ci-logs/browserstack-sanity-check.txt >> "$GITHUB_STEP_SUMMARY"
+            echo "### Contexto de ejecucion" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Campo | Valor |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+            while IFS='=' read -r key value; do
+              [ -n "${key:-}" ] || continue
+              printf '| %s | %s |\n' "$key" "$value" >> "$GITHUB_STEP_SUMMARY"
+            done < target/ci-logs/browserstack-sanity-check.txt
           else
             echo "- No ejecutado." >> "$GITHUB_STEP_SUMMARY"
           fi
