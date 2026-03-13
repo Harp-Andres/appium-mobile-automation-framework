@@ -38,6 +38,8 @@ jobs:
     name: Sanity Tests (framework health)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      browserstack_auth_ok: ${{ steps.browserstack_auth_sanity.outputs.browserstack_auth_ok }}
     # Corre siempre: push, PR y workflow_dispatch
 
     steps:
@@ -54,6 +56,68 @@ jobs:
       - name: 🧪 Run Sanity Tests - Unit Tests + Cucumber Health (sin dispositivo)
         run: mvn test "-Drun.mobile.tests=false" -B
 
+      - name: 🔐 BrowserStack Auth Sanity (manual)
+        id: browserstack_auth_sanity
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          INPUT_PLATFORM: ${{ github.event.inputs.platform }}
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          BROWSERSTACK_ANDROID_APP_ID: ${{ secrets.BROWSERSTACK_ANDROID_APP_ID }}
+          BROWSERSTACK_IOS_APP_ID: ${{ secrets.BROWSERSTACK_IOS_APP_ID }}
+          BROWSERSTACK_ANDROID_APP_PACKAGE: ${{ vars.BROWSERSTACK_ANDROID_APP_PACKAGE }}
+          BROWSERSTACK_IOS_BUNDLE_ID: ${{ vars.BROWSERSTACK_IOS_BUNDLE_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/ci-logs
+
+          echo "browserstack_auth_ok=false" >> "$GITHUB_OUTPUT"
+
+          if [ -z "${BROWSERSTACK_USERNAME:-}" ] || [ -z "${BROWSERSTACK_ACCESS_KEY:-}" ]; then
+            echo "ERROR: faltan secrets BROWSERSTACK_USERNAME/BROWSERSTACK_ACCESS_KEY" | tee target/ci-logs/browserstack-sanity-check.txt
+            exit 1
+          fi
+
+          echo "::add-mask::${BROWSERSTACK_USERNAME}"
+          echo "::add-mask::${BROWSERSTACK_ACCESS_KEY}"
+
+          http_code=$(curl -sS -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" -o /dev/null -w "%{http_code}" "https://api-cloud.browserstack.com/app-automate/recent_apps")
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: BrowserStack auth check falló (HTTP ${http_code})" | tee target/ci-logs/browserstack-sanity-check.txt
+            exit 1
+          fi
+
+          case "${INPUT_PLATFORM}" in
+            android)
+              [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              ;;
+            ios)
+              [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_IOS_BUNDLE_ID:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              ;;
+            both)
+              [ -n "${BROWSERSTACK_ANDROID_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_ANDROID_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_ANDROID_APP_PACKAGE:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_ANDROID_APP_PACKAGE" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_IOS_APP_ID:-}" ] || { echo "ERROR: falta secret BROWSERSTACK_IOS_APP_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              [ -n "${BROWSERSTACK_IOS_BUNDLE_ID:-}" ] || { echo "ERROR: falta variable BROWSERSTACK_IOS_BUNDLE_ID" | tee target/ci-logs/browserstack-sanity-check.txt; exit 1; }
+              ;;
+            *)
+              echo "ERROR: platform no soportada: ${INPUT_PLATFORM}" | tee target/ci-logs/browserstack-sanity-check.txt
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "status=ok"
+            echo "platform=${INPUT_PLATFORM}"
+            echo "auth_http_code=${http_code}"
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee target/ci-logs/browserstack-sanity-check.txt
+
+          echo "browserstack_auth_ok=true" >> "$GITHUB_OUTPUT"
+
       - name: Upload Sanity Test Results
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,6 +128,7 @@ jobs:
             target/allure-results/
             target/cucumber-reports/
             target/surefire-reports/
+            target/ci-logs/browserstack-sanity-check.txt
           retention-days: 14
 
   # ============================================================
@@ -74,7 +139,7 @@ jobs:
     needs: [ sanity-tests ]
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success'
+    if: github.event_name == 'workflow_dispatch' && needs['sanity-tests'].result == 'success' && needs['sanity-tests'].outputs.browserstack_auth_ok == 'true'
     strategy:
       fail-fast: false
       max-parallel: 2
