@@ -4,30 +4,31 @@ import com.automatizacion.base.pages.HomePage;
 import org.junit.jupiter.api.Assertions;
 
 /**
- * Acciones de negocio para la Home enfocadas a BDD.
+ * Application service for TheApp home screen (BDD orchestration).
+ * Depends on {@link HomePage} (DIP) — single responsibility: home business checks.
  */
 public class HomeActions {
 
     private final HomePage homePage;
 
     public HomeActions() {
-        this.homePage = new HomePage();
+        this(new HomePage());
+    }
+
+    public HomeActions(HomePage homePage) {
+        this.homePage = homePage;
     }
 
     public void validateUserIsOnHome() {
-        boolean visible = homePage.isTitleDisplayed();
-        Assertions.assertTrue(visible, "El título de la app debería estar visible");
-        homePage.captureEvidence("PASS_home_titulo_visible");
-    }
-
-    public void validateApplicationTitle(String expectedTitle) {
-        String actualTitle = homePage.getTitleText();
-        Assertions.assertEquals(
-            expectedTitle.trim(),
-            actualTitle == null ? "" : actualTitle.trim(),
-            "El título de la app no coincide con el esperado"
+        Assertions.assertTrue(
+            homePage.isLoginScreenEntryVisible(),
+            "TheApp home should show the Login Screen entry"
         );
-        homePage.captureEvidence("PASS_validar_titulo_" + expectedTitle.replace(" ", "_"));
+        homePage.captureEvidence("PASS_home_login_entry_visible");
     }
 
+    public void openLoginScreen() {
+        homePage.openLoginScreen();
+        homePage.captureEvidence("PASS_login_screen_opened");
+    }
 }

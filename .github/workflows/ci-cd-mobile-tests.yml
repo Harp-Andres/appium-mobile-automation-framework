@@ -220,6 +220,11 @@ jobs:
           adb devices >> target\ci-logs\context.txt 2>&1
           curl.exe -s %APPIUM_SERVER_URL%/status > target\ci-logs\appium-status.json 2>&1
 
+      # AUT download only — does not change runner labels, Appium check, or mvn -Pbdd invocation
+      - name: Download TheApp APK
+        shell: cmd
+        run: call scripts\download-test-apps.cmd
+
       - name: Run Mobile Tests - local
         shell: cmd
         run: |

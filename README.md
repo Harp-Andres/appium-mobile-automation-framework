@@ -1,33 +1,47 @@
 # Appium Mobile Automation Framework (local / self-hosted)
 
-**Objective:** demo **classic Appium + Cucumber + POM** on a **local emulator or self-hosted GitHub Actions runner**.
+**Objective:** classic **Appium + Cucumber + POM** on a **local emulator or Windows self-hosted GitHub Actions runner**.
 
-This is the mature **self-hosted / local** specialty. Do not treat it as a cloud-farm or Serenity Screenplay project.
+The self-hosted pipeline (labels `self-hosted, android, appium, windows`, Appium on `:4723`, `mvn test -Pbdd`, Allure artifacts) stays the execution model. What evolves is the **AUT and code quality**.
 
 | Sibling | Specialty |
 | --- | --- |
-| **This repo** | Local + self-hosted Appium (ExpandTesting practice app) |
+| **This repo** | Local + self-hosted Appium (mature runner) |
 | [`appium-mobile-cloud-automation-framework`](https://github.com/Harp-Andres/appium-mobile-cloud-automation-framework) | BrowserStack + AWS Device Farm |
-| [`demo-serenity-screenplay-mobile`](https://github.com/Harp-Andres/demo-serenity-screenplay-mobile) | Serenity BDD Screenplay teaching |
+| [`demo-serenity-screenplay-mobile`](https://github.com/Harp-Andres/demo-serenity-screenplay-mobile) | Serenity BDD Screenplay |
 
-## Default AUT (self-hosted proven)
+## App under test
 
-`local.properties` uses **ExpandTesting Practice**:
+**[TheApp](https://github.com/appium-pro/TheApp)** — industry-standard free Appium demo (`com.appiumpro.the_app`).
 
-- `app.package=com.expandtesting.practice`
-- `app.activity=com.expandtesting.practice.MainActivity`
+```bash
+# macOS/Linux
+./scripts/download-test-apps.sh
 
-Scenarios: framework health, mobile smoke, **counter demo**.
+# Windows (self-hosted)
+scripts\download-test-apps.cmd
+```
 
-Optional portable AUT (TheApp) lives in `config/theapp.properties` + `./scripts/download-test-apps.sh` — **not** the default, so self-hosted stays green.
+Demo login: `alice` / `mypassword`
+
+## Layers (SOLID / OOP)
+
+| Layer | Responsibility |
+| --- | --- |
+| `ui/*` | Locators only (PageFactory) |
+| `pages/*` | Interactions / waits |
+| `actions/*` | Business flows (injectable pages) |
+| `steps/*` | Cucumber glue only |
+| `driver/*` + `config/*` | Session + configuration |
 
 ## Run
 
 ```bash
-# Unit tests (no device) — CI sanity
+# Unit tests (no device) — CI sanity on ubuntu-latest
 mvn test
 
-# BDD on local Appium + device/emulator (self-hosted)
+# BDD on Appium + device (self-hosted / laptop)
+./scripts/download-test-apps.sh   # or .cmd on Windows
 mvn test -Pbdd
 ```
 
@@ -35,7 +49,5 @@ mvn test -Pbdd
 
 `.github/workflows/ci-cd-mobile-tests.yml`:
 
-- **ubuntu**: `mvn test` (units)
-- **self-hosted**: optional `workflow_dispatch` with Appium + Android device (`mvn test -Pbdd`)
-
-See `docs/TEST_APP_AND_FARMS.md` for optional TheApp notes only.
+1. **ubuntu-latest**: `mvn test` (always)
+2. **self-hosted** (`workflow_dispatch`): verify ADB/Appium → download TheApp → `mvn test -Pbdd` → Allure artifacts

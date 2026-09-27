@@ -67,5 +67,6 @@ package-lock.json
 
 # Downloaded demo apps
 /apps/
+*.apk
 *.ipa
 TheApp.app.zip

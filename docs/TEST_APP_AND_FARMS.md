@@ -1,20 +1,20 @@
-# AUT + execution (local / self-hosted repo)
+# AUT (local / self-hosted)
 
-## Objective
+## Specialty
 
-This repo is the **mature local + self-hosted** Appium demo. Default AUT stays **ExpandTesting Practice** so existing self-hosted runners keep working.
+This repo keeps the **mature Windows self-hosted runner** (Appium already up, ADB, `mvn test -Pbdd`). The AUT is **TheApp** for professional, portable Appium demos.
 
-## Default (do not change lightly)
+## Download
 
-`src/test/resources/config/local.properties`:
+- Unix: `./scripts/download-test-apps.sh`
+- Windows CI: `scripts\download-test-apps.cmd` (invoked by the workflow before BDD)
 
-- package: `com.expandtesting.practice`
-- activity: `com.expandtesting.practice.MainActivity`
-- features: `framework_health`, `mobile_smoke`, `counter_demo`
+## What must not break
 
-## Optional portable AUT
-
-`config/theapp.properties` + `./scripts/download-test-apps.sh` exist only as an experiment path. They are **not** the self-hosted default.
+- Runner labels: `self-hosted, android, appium, windows`
+- Appium URL: `http://127.0.0.1:4723`
+- Command: `mvn test -Pbdd -Drun.mobile.tests=true -Denv=local ...`
+- Artifact / Allure publish jobs
 
 Cloud farms → sibling `appium-mobile-cloud-automation-framework`  
 Serenity Screenplay → sibling `demo-serenity-screenplay-mobile`
