@@ -10,28 +10,32 @@ import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class MobileSmokeSteps {
+
+    private static final Logger log = LoggerFactory.getLogger(MobileSmokeSteps.class);
 
     private ApplicationState appState;
 
     @Given("mobile execution is enabled")
     public void ejecucionMobileHabilitada() {
         boolean enabled = Boolean.parseBoolean(System.getProperty("run.mobile.tests", "true"));
-        System.out.println("[STEPS][INFO] mobile execution enabled=" + enabled);
+        log.info("mobile execution enabled={}", enabled);
         Assumptions.assumeTrue(enabled, "Mobile scenario skipped because run.mobile.tests=false");
     }
 
     @When("I initialize the Appium driver")
     public void inicializoDriverAppium() {
         Assertions.assertNotNull(DriverManager.getDriver(), "Driver was not initialized by Hooks");
-        System.out.println("[STEPS][INFO] driver initialized");
+        log.info("driver initialized");
     }
 
     @Then("the mobile session should be available")
     public void sesionMobileDisponible() {
         Assertions.assertNotNull(DriverManager.getDriver().getSessionId(), "Appium sessionId was not created");
-        System.out.println("[STEPS][INFO] sessionId=" + DriverManager.getDriver().getSessionId());
+        log.info("sessionId={}", DriverManager.getDriver().getSessionId());
     }
 
     @When("I query the app launch state")
@@ -48,7 +52,7 @@ public class MobileSmokeSteps {
         Assertions.assertFalse(appId.isBlank(), "App identifier is empty. Configure app.package (Android) or bundle.id (iOS)");
         appState = ((InteractsWithApps) driver).queryAppState(appId);
 
-        System.out.println("[STEPS][INFO] appId=" + appId + " appState=" + appState);
+        log.info("appId={} appState={}", appId, appState);
     }
 
     @Then("the app should be running in foreground")
@@ -59,6 +63,6 @@ public class MobileSmokeSteps {
             appState,
             "Expected app in foreground, but state was: " + appState
         );
-        System.out.println("[STEPS][INFO] app is visible in device (foreground)");
+        log.info("app is visible in device (foreground)");
     }
 }

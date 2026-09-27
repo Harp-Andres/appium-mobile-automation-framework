@@ -8,8 +8,12 @@ import io.cucumber.java.Before;
 import io.cucumber.java.Scenario;
 import io.qameta.allure.Allure;
 import org.junit.jupiter.api.Assumptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Hooks {
+
+    private static final Logger log = LoggerFactory.getLogger(Hooks.class);
 
     @Before(order = 1, value = "@mobile")
     public void beforeMobileScenario() {
@@ -62,14 +66,14 @@ public class Hooks {
     }
 
     private static void logInfo(String message) {
-        System.out.println("[FRAMEWORK][INFO] " + message);
+        log.info(message);
     }
 
     private static void logWarn(String message) {
-        System.out.println("[FRAMEWORK][WARN] " + message);
+        log.warn(message);
     }
 
     private static void logError(String message) {
-        System.out.println("[FRAMEWORK][ERROR] " + message);
+        log.error(message);
     }
 }

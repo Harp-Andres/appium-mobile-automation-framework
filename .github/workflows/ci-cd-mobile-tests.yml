@@ -45,7 +45,7 @@ jobs:
           cache: maven
 
       - name: Run Sanity Tests (no device required)
-        run: mvn test -Drun.mobile.tests=false -B
+        run: mvn test -B
 
       - name: Upload Sanity Test Results
         if: always()
@@ -228,7 +228,7 @@ jobs:
             exit /b 1
           )
           mkdir target\ci-logs 2>nul
-          call "%MVN_CMD%" test -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -V -e -B > target\ci-logs\mobile-maven.log 2>&1
+          call "%MVN_CMD%" test -Pbdd -Drun.mobile.tests=true -Denv=local -Devidence.video.enabled=true -V -e -B > target\ci-logs\mobile-maven.log 2>&1
           if errorlevel 1 (
             echo ===== LAST 200 LINES OF MAVEN LOG =====
             powershell -NoProfile -Command "Get-Content 'target\ci-logs\mobile-maven.log' -Tail 200"

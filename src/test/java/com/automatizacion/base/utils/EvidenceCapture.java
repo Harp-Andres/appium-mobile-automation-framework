@@ -4,6 +4,8 @@ import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -15,6 +17,8 @@ import java.util.Base64;
  * Utilidades para capturar evidencias (screenshots, logs, video) en Appium.
  */
 public class EvidenceCapture {
+
+    private static final Logger log = LoggerFactory.getLogger(EvidenceCapture.class);
 
     private static final String SCREENSHOTS_DIR = "target/screenshots";
     private static final String VIDEOS_DIR = "target/videos";
@@ -36,7 +40,7 @@ public class EvidenceCapture {
                 try (FileOutputStream fos = new FileOutputStream(filepath)) {
                     fos.write(screenshot);
                 }
-                System.out.println("[EVIDENCE] Screenshot guardado: " + filepath);
+                log.info("Screenshot guardado: {}", filepath);
             }
 
             Allure.getLifecycle().addAttachment(
@@ -45,13 +49,12 @@ public class EvidenceCapture {
                 "png",
                 screenshot
             );
-            System.out.println("[EVIDENCE] Screenshot adjuntado a Allure: " + attachmentName);
+            log.debug("Screenshot adjuntado a Allure: {}", attachmentName);
         } catch (Exception e) {
-            System.out.println("[EVIDENCE] Error al capturar screenshot: " + e.getMessage());
+            log.warn("Error al capturar screenshot: {}", e.getMessage());
         }
     }
 
-    // Metodo legacy para compatibilidad con BasePage y codigo existente.
     public static void captureScreenshot(AppiumDriver driver, String stepName) {
         attachScreenshot(driver, stepName, true);
     }
@@ -62,7 +65,7 @@ public class EvidenceCapture {
 
     public static void attachVideoFromBase64(String base64Video, String attachmentName, boolean saveToDisk) {
         if (base64Video == null || base64Video.isBlank()) {
-            System.out.println("[EVIDENCE] Video vacio, no se adjunta");
+            log.debug("Video vacio, no se adjunta");
             return;
         }
 
@@ -76,7 +79,7 @@ public class EvidenceCapture {
                 try (FileOutputStream fos = new FileOutputStream(filepath)) {
                     fos.write(videoBytes);
                 }
-                System.out.println("[EVIDENCE] Video guardado: " + filepath);
+                log.info("Video guardado: {}", filepath);
             }
 
             Allure.getLifecycle().addAttachment(
@@ -85,18 +88,18 @@ public class EvidenceCapture {
                 "mp4",
                 videoBytes
             );
-            System.out.println("[EVIDENCE] Video adjuntado a Allure: " + attachmentName);
+            log.debug("Video adjuntado a Allure: {}", attachmentName);
         } catch (Exception e) {
-            System.out.println("[EVIDENCE] Error al adjuntar video: " + e.getMessage());
+            log.warn("Error al adjuntar video: {}", e.getMessage());
         }
     }
 
     public static void attachLog(String title, String content) {
         try {
             Allure.addAttachment(title, "text/plain", content, "txt");
-            System.out.println("[EVIDENCE] Log adjuntado: " + title);
+            log.debug("Log adjuntado: {}", title);
         } catch (Exception e) {
-            System.out.println("[EVIDENCE] Error al adjuntar log: " + e.getMessage());
+            log.warn("Error al adjuntar log: {}", e.getMessage());
         }
     }
 
@@ -109,7 +112,7 @@ public class EvidenceCapture {
 
             attachLog("Driver Info", driverInfo);
         } catch (Exception e) {
-            System.out.println("[EVIDENCE] Error al adjuntar driver info: " + e.getMessage());
+            log.warn("Error al adjuntar driver info: {}", e.getMessage());
         }
     }
 

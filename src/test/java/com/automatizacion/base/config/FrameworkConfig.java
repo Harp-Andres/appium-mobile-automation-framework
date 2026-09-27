@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Objects;
 import java.util.Properties;
 
 public final class FrameworkConfig {
@@ -65,25 +64,8 @@ public final class FrameworkConfig {
             throw new IllegalStateException("No se pudo cargar configuracion para env=" + env, exception);
         }
 
-        validateRequiredKeys(loaded);
+        ConfigRequiredKeysValidator.validate(loaded);
         return loaded;
-    }
-
-    private void validateRequiredKeys(Properties loaded) {
-        Objects.requireNonNull(loaded, "properties");
-        String[] required = {
-            "appium.server.url",
-            "platform.name",
-            "device.name",
-            "automation.name"
-        };
-
-        for (String key : required) {
-            String value = loaded.getProperty(key);
-            if (value == null || value.isBlank()) {
-                throw new IllegalStateException("Falta propiedad obligatoria: " + key);
-            }
-        }
     }
 }
 

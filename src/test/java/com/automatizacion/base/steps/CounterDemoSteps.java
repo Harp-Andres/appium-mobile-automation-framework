@@ -5,12 +5,16 @@ import com.automatizacion.base.actions.HomeActions;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Steps BDD delgados para flujo Home → Módulo Counter.
  * Delegan la lógica de negocio a la capa Actions.
  */
 public class CounterDemoSteps {
+
+    private static final Logger log = LoggerFactory.getLogger(CounterDemoSteps.class);
 
     private HomeActions homeActions;
     private CounterActions counterActions;
@@ -20,10 +24,10 @@ public class CounterDemoSteps {
      */
     @Given("the user is on the application home page")
     public void userIsOnHomePage() {
-        System.out.println("[STEPS] Verificando que el usuario está en la página de inicio");
+        log.info("Verificando que el usuario está en la página de inicio");
         homeActions = new HomeActions();
         homeActions.validateUserIsOnHome();
-        System.out.println("[STEPS] ✅ Usuario confirmado en página de inicio");
+        log.info("Usuario confirmado en página de inicio");
     }
 
     /**
@@ -31,10 +35,10 @@ public class CounterDemoSteps {
      */
     @When("the user navigates to the counter demo screen")
     public void navigateToCounterDemo() {
-        System.out.println("[STEPS] Navegando a módulo Counter Demo desde Home");
+        log.info("Navegando a módulo Counter Demo desde Home");
         ensureCounterActions();
         counterActions.openCounterDemo();
-        System.out.println("[STEPS] ✅ Módulo Counter Demo abierto");
+        log.info("Módulo Counter Demo abierto");
     }
 
     /**

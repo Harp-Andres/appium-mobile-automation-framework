@@ -7,6 +7,8 @@ import io.appium.java_client.screenrecording.CanRecordScreen;
 import io.cucumber.java.After;
 import io.cucumber.java.Before;
 import io.cucumber.java.Scenario;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Hooks para captura de evidencias en Cucumber.
@@ -14,9 +16,11 @@ import io.cucumber.java.Scenario;
  */
 public class EvidenceHooks {
 
+    private static final Logger log = LoggerFactory.getLogger(EvidenceHooks.class);
+
     @Before(order = 10, value = "@mobile")
     public void beforeMobileScenario(Scenario scenario) {
-        System.out.println("[EVIDENCE] Iniciando escenario: " + scenario.getName());
+        log.info("Iniciando escenario: {}", scenario.getName());
 
         boolean videoEnabled = Boolean.parseBoolean(System.getProperty("evidence.video.enabled", "false"));
         if (!videoEnabled) {
@@ -27,9 +31,9 @@ public class EvidenceHooks {
         if (driver instanceof CanRecordScreen recorder) {
             try {
                 recorder.startRecordingScreen();
-                System.out.println("[EVIDENCE] Grabacion de video iniciada");
+                log.info("Grabacion de video iniciada");
             } catch (Exception e) {
-                System.out.println("[EVIDENCE] No se pudo iniciar grabacion: " + e.getMessage());
+                log.warn("No se pudo iniciar grabacion: {}", e.getMessage());
             }
         }
     }
@@ -49,9 +53,9 @@ public class EvidenceHooks {
         }
 
         if (scenario.isFailed()) {
-            System.out.println("[EVIDENCE] Escenario fallido: " + scenario.getName());
+            log.warn("Escenario fallido: {}", scenario.getName());
         } else {
-            System.out.println("[EVIDENCE] Escenario exitoso: " + scenario.getName());
+            log.info("Escenario exitoso: {}", scenario.getName());
         }
 
         boolean videoEnabled = Boolean.parseBoolean(System.getProperty("evidence.video.enabled", "false"));
@@ -61,7 +65,7 @@ public class EvidenceHooks {
                 String videoName = (scenario.isFailed() ? "FAILED_VIDEO_" : "PASSED_VIDEO_") + scenario.getName();
                 EvidenceCapture.attachVideoFromBase64(base64Video, videoName, scenario.isFailed());
             } catch (Exception e) {
-                System.out.println("[EVIDENCE] No se pudo detener/adjuntar video: " + e.getMessage());
+                log.warn("No se pudo detener/adjuntar video: {}", e.getMessage());
             }
         }
 

@@ -8,7 +8,7 @@
     <artifactId>appium-cucumber-base</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <name>appium-cucumber-base</name>
-    <description>Base framework Appium + Cucumber + JUnit5 + Allure</description>
+    <description>Local Appium (emulator/device) demo: Cucumber + JUnit5 + Allure</description>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
@@ -22,6 +22,8 @@
         <junit.platform.version>1.11.4</junit.platform.version>
         <allure.version>2.29.1</allure.version>
         <surefire.version>3.5.2</surefire.version>
+        <slf4j.version>2.0.16</slf4j.version>
+        <logback.version>1.5.12</logback.version>
     </properties>
 
     <dependencyManagement>
@@ -99,6 +101,19 @@
             <version>${allure.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -108,9 +123,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire.version}</version>
                 <configuration>
-                    <includes>
-                        <include>**/RunCucumberTest.java</include>
-                    </includes>
+                    <excludes>
+                        <exclude>**/RunCucumberTest.java</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
 
@@ -121,5 +136,25 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>bdd</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration combine.self="override">
+                            <includes>
+                                <include>**/RunCucumberTest.java</include>
+                            </includes>
+                            <excludes combine.self="override"/>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
 

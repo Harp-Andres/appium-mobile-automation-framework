@@ -6,6 +6,8 @@ import io.appium.java_client.android.AndroidDriver;
 import io.appium.java_client.android.options.UiAutomator2Options;
 import io.appium.java_client.ios.IOSDriver;
 import io.appium.java_client.ios.options.XCUITestOptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -14,6 +16,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 
 public final class DriverFactory {
+
+    private static final Logger log = LoggerFactory.getLogger(DriverFactory.class);
 
     private DriverFactory() {
     }
@@ -115,10 +119,10 @@ public final class DriverFactory {
     }
 
     private static void logInfo(String message) {
-        System.out.println("[DRIVER][INFO] " + message);
+        log.info(message);
     }
 
     private static void logError(String message) {
-        System.out.println("[DRIVER][ERROR] " + message);
+        log.error(message);
     }
 }
