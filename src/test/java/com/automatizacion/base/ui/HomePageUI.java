@@ -8,18 +8,13 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.PageFactory;
 
 /**
- * UI elementos de la pantalla Home.
- * Contiene el botón para acceder al módulo Counter Demo.
+ * UI elements for TheApp home menu.
  */
 public class HomePageUI {
 
-    @AndroidFindBy(id = "com.expandtesting.practice:id/tv_app_name")
-    @iOSXCUITFindBy(accessibility = "x")
-    public WebElement txtTitle;
-
-    @AndroidFindBy(id = "com.expandtesting.practice:id/btn_counter_demo")
-    @iOSXCUITFindBy(accessibility = "x")
-    public WebElement btnCounterDemo;
+    @AndroidFindBy(accessibility = "Login Screen")
+    @iOSXCUITFindBy(accessibility = "Login Screen")
+    public WebElement btnLoginScreen;
 
     public HomePageUI(AppiumDriver driver) {
         PageFactory.initElements(new AppiumFieldDecorator(driver), this);

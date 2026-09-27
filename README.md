@@ -1,6 +1,6 @@
 # Appium Mobile Automation Framework (local)
 
-Demo framework for **local emulator or physical device** automation with Appium, Cucumber (BDD), JUnit 5, and Allure. Cloud device farms (BrowserStack, AWS Device Farm) live in the sibling repo [`appium-mobile-cloud-automation-framework`](https://github.com/Harp-Andres/appium-mobile-cloud-automation-framework).
+Demo framework for **local emulator or physical device** automation with Appium, Cucumber (BDD), JUnit 5, Page Objects, and Allure. Cloud device farms (BrowserStack, AWS Device Farm) live in the sibling repo [`appium-mobile-cloud-automation-framework`](https://github.com/Harp-Andres/appium-mobile-cloud-automation-framework).
 
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://www.oracle.com/java/)
 [![Appium](https://img.shields.io/badge/Appium-9.2.3-blue.svg)](https://appium.io/)
@@ -14,12 +14,14 @@ Demo framework for **local emulator or physical device** automation with Appium,
 | Android emulator / USB device | Optional local fallback only |
 | Self-hosted GitHub Actions runner | BrowserStack CI workflow |
 
+Default app under test: **TheApp** (`com.appiumpro.the_app`). See `docs/TEST_APP_AND_FARMS.md`.
+
 ## Stack
 
 - **Java 17**, **Maven**, **Appium Java Client 9.2.x**
 - **Cucumber 7** + **JUnit Platform**
-- **Allure** for reports and evidence
-- **SLF4J + Logback** for framework logging (no `System.out` in production code)
+- **Allure** for reports and evidence (screenshots via `EvidenceCapture` / hooks)
+- **SLF4J + Logback** for framework logging
 
 ## Project layout
 
@@ -33,7 +35,18 @@ src/test/java/com/automatizacion/base/
   steps/      Cucumber step definitions
   utils/      EvidenceCapture
 src/test/resources/config/local.properties
+src/test/resources/features/
+  framework_health.feature   # no device
+  mobile_smoke.feature       # session + foreground app
+  theapp_login_smoke.feature # TheApp login POM smoke
+apps/TheApp.apk              # download via scripts/download-test-apps.sh (gitignored)
 ```
+
+## Setup
+
+1. Install JDK 17, Maven, Android SDK, Appium 2.x, and start an emulator or connect a device.
+2. Download the AUT: `./scripts/download-test-apps.sh`
+3. Adjust `device.name` / `platform.version` in `local.properties` if needed.
 
 ## Run tests
 
@@ -49,23 +62,27 @@ mvn test
 mvn test -Pbdd -Drun.mobile.tests=true -Denv=local
 ```
 
-Skip mobile scenarios but still run framework health:
+Skip `@mobile` scenarios but still run `framework_health.feature`:
 
 ```bash
 mvn test -Pbdd -Drun.mobile.tests=false
 ```
 
-Configure `src/test/resources/config/local.properties` for your emulator (`device.name`, `app.package`, etc.).
+## Reports and evidence
+
+- Cucumber HTML: `target/cucumber-reports/`
+- Allure results: `target/allure-results/` → `mvn allure:serve` or `allure generate`
+- Screenshots on key steps via `EvidenceCapture` (see `EvidenceHooks`)
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/ci-cd-mobile-tests.yml`:
+GitHub Actions: `.github/workflows/ci-cd-mobile-tests.yml`
 
-- **Sanity**: `mvn test` (unit tests on `ubuntu-latest`)
-- **Mobile**: manual `workflow_dispatch` on a self-hosted Android/Appium runner (`mvn test -Pbdd ...`)
+- **Sanity** (every push/PR): `mvn test` on `ubuntu-latest`
+- **Mobile** (manual `workflow_dispatch` only): self-hosted Windows runner with Android + Appium → `mvn test -Pbdd -Drun.mobile.tests=true -Denv=local`
+
+Self-hosted runner labels: `self-hosted`, `android`, `appium`, `windows`. Ensure Appium listens on `http://127.0.0.1:4723` and `adb devices` shows your emulator.
 
 ## Related docs
 
-- `SETUP_SELF_HOSTED_RUNNER.md` — self-hosted runner for real devices
-- `CAPTURA_EVIDENCIAS.md`, `COMO_VER_REPORTES.md` — evidence and Allure
-- `GUIA_CUCUMBER_STEPS.md`, `SELECTORES_MULTIPLATAFORMA.md` — BDD and locators
+- `docs/TEST_APP_AND_FARMS.md` — AUT choice and sibling repos
