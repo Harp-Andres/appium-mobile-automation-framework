@@ -64,3 +64,8 @@ env/
 node_modules/
 package-lock.json
 
+
+# Downloaded demo apps
+/apps/
+*.ipa
+TheApp.app.zip
