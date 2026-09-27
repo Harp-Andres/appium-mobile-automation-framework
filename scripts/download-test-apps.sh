@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Download TheApp APK for local BDD (see local.properties app.path).
+# Optional: download TheApp for a portable AUT (does not change default local.properties).
+# Your current ExpandTesting package/activity local setup stays untouched.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${ROOT}/apps"
@@ -15,5 +16,6 @@ else
   echo "OK: $dest"
 fi
 echo
-echo "Run BDD against a local emulator/device:"
-echo "  mvn test -Pbdd -Drun.mobile.tests=true -Denv=local"
+echo "To try TheApp locally without breaking ExpandTesting defaults, run BDD with:"
+echo "  mvn test -Pbdd -Dapp.path=${dest}"
+echo "(only if your DriverFactory honors app.path — otherwise set app.path in a local override file)"

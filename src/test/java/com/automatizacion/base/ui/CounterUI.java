@@ -8,20 +8,24 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.PageFactory;
 
 /**
- * UI elementos de la pantalla Home.
- * Contiene el botón para acceder al módulo Counter Demo.
+ * UI elementos de la pantalla Counter Demo (módulo contador).
  */
-public class HomePageUI {
+public class CounterUI {
 
-    @AndroidFindBy(id = "com.expandtesting.practice:id/tv_app_name")
+    @AndroidFindBy(id = "com.expandtesting.practice:id/btn_increment")
     @iOSXCUITFindBy(accessibility = "x")
-    public WebElement txtTitle;
+    public WebElement btnIncrement;
 
-    @AndroidFindBy(id = "com.expandtesting.practice:id/btn_counter_demo")
+    @AndroidFindBy(id = "com.expandtesting.practice:id/btn_reset")
     @iOSXCUITFindBy(accessibility = "x")
-    public WebElement btnCounterDemo;
+    public WebElement btnReset;
 
-    public HomePageUI(AppiumDriver driver) {
+    @AndroidFindBy(id = "com.expandtesting.practice:id/tv_counter")
+    @iOSXCUITFindBy(accessibility = "x")
+    public WebElement tvCounter;
+
+    public CounterUI(AppiumDriver driver) {
         PageFactory.initElements(new AppiumFieldDecorator(driver), this);
     }
 }
+

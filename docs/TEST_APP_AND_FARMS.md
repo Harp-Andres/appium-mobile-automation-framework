@@ -1,18 +1,15 @@
-# App under test (local repo)
+# App under test + farms (local repo)
 
-This repo targets **local Appium only** (emulator or USB device). Cloud farms live in [`appium-mobile-cloud-automation-framework`](https://github.com/Harp-Andres/appium-mobile-cloud-automation-framework). Serenity Screenplay demos live in [`demo-serenity-screenplay-mobile`](https://github.com/Harp-Andres/demo-serenity-screenplay-mobile).
+This repo’s specialty is **local Appium**. Do not break `local.properties` ExpandTesting runs.
 
-## Default AUT: TheApp
+## Free apps (shared recommendation)
 
-| Item | Value |
+| App | Use here |
 | --- | --- |
-| APK | `apps/TheApp.apk` (not in git — run `./scripts/download-test-apps.sh`) |
-| Package | `com.appiumpro.the_app` |
-| Activity | `.MainActivity` |
-| Config | `src/test/resources/config/local.properties` |
+| ExpandTesting practice (current default) | Keep for your proven local package/activity flow |
+| **TheApp** (`apps/TheApp.apk`) | Portable alternative → `config/theapp.properties` + `./scripts/download-test-apps.sh` |
+| ApiDemos | Prefer the **cloud** sibling for farm demos |
 
-BDD smoke: home → **Login Screen** → credentials `alice` / `mypassword` → secret text contains `You are logged in as`.
-
-## Other apps
-
-Use **ApiDemos** or farm-specific builds in the **cloud** sibling repo, not here.
+Cloud farms (BrowserStack / AWS) live in  
+[`appium-mobile-cloud-automation-framework`](https://github.com/Harp-Andres/appium-mobile-cloud-automation-framework).  
+Serenity Screenplay: [`demo-serenity-screenplay-mobile`](https://github.com/Harp-Andres/demo-serenity-screenplay-mobile).

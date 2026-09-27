@@ -3,7 +3,7 @@ package com.automatizacion.base.pages;
 import com.automatizacion.base.ui.HomePageUI;
 
 /**
- * Page Object for TheApp home screen.
+ * Page Object para la pantalla Home de la aplicación.
  */
 public class HomePage extends BasePage {
 
@@ -14,11 +14,15 @@ public class HomePage extends BasePage {
         this.ui = new HomePageUI(driver);
     }
 
-    public void openLoginScreen() {
-        click(ui.btnLoginScreen);
+    public void clickCounterDemoButton() {
+        click(ui.btnCounterDemo);
     }
 
-    public boolean isLoginScreenEntryVisible() {
-        return isVisible(ui.btnLoginScreen);
+    public String getTitleText() {
+        return textOf(ui.txtTitle);
+    }
+
+    public boolean isTitleDisplayed() {
+        return isVisible(ui.txtTitle);
     }
 }

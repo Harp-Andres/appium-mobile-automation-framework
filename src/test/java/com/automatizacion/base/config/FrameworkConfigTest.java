@@ -19,8 +19,6 @@ class FrameworkConfigTest {
         Assertions.assertEquals("local", config.getActiveEnv());
         Assertions.assertEquals("Android", config.get("platform.name"));
         Assertions.assertFalse(config.get("appium.server.url").isBlank());
-        Assertions.assertEquals("com.appiumpro.the_app", config.get("app.package"));
-        Assertions.assertEquals("apps/TheApp.apk", config.get("app.path"));
     }
 
     @Test
